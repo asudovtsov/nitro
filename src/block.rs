@@ -69,7 +69,13 @@ impl Block {
         self.prev
     }
 
+    pub fn has_index(&self) -> bool {
+        assert!(!self.index.is_null());
+        !self.index.is_null()
+    }
+
     pub fn reset_index(&mut self) {
+        assert!(!self.index.is_null());
         self.index = null_mut();
     }
 
@@ -77,9 +83,24 @@ impl Block {
         self.counter
     }
 
-    pub fn capacity(&self) -> usize {
-        self.capacity
+    pub fn increment_counter(&mut self) {
+        self.counter += 1;
     }
+
+    pub fn decrement_counter(&mut self) {
+        assert!(self.counter > 0);
+        self.counter -= 1;
+    }
+
+    pub fn merge_insert_free_chunk_to_index(&self, chunk: Chunk) {
+        assert!(!self.index.is_null());
+        unsafe{&mut (*self.index)}.merge_insert_free_chunk(chunk);
+    }
+
+    // pub fn capacity(&self) -> usize {
+    //     self.capacity
+    // }
+
     pub fn alloc_block(prev: *mut Block, index: *mut Index, capacity: usize) -> (*mut Block, Chunk) {
         assert!(capacity != 0);
         let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + capacity) else {
@@ -100,18 +121,18 @@ impl Block {
 
     pub fn drop_block(block: *mut Block) {
         assert_eq!(unsafe{&(*block)}.counter, 0);
-
-        let capacity = unsafe{&(*block)}.capacity;
-        unsafe { block.drop_in_place(); }
-
-        let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + capacity) else {
+        let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + unsafe{&(*block)}.capacity) else {
             todo!()
         };
 
+        //#TODO is it necessary?
         let Ok(layout) = layout.align_to(mem::align_of::<Block>()) else {
             todo!()
         };
 
-        unsafe { alloc::dealloc(block.cast(), layout); }
+        unsafe {
+            block.drop_in_place();
+            alloc::dealloc(block.cast(), layout);
+        }
     }
 }

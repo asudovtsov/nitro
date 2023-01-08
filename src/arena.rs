@@ -95,15 +95,20 @@ impl Arena {
 
     pub fn shrink_to_fit(&mut self) { todo!() }
 
-    fn place_internal<T>(&mut self, value: T) -> (*mut Block, *mut T){
-        assert!(!self.index.is_null());
-        let chunks = unsafe{&mut (*self.index)};
-
+    fn place_internal<T>(&mut self, value: T) -> (*mut Block, *mut T) {
         // get chunk to place data
-        let index = match chunks.chunk_for_place::<T>() {
-            Some(index) => index,
-            None => self.grow_for::<T>()
-        };
+        let chunks;
+        let index;
+        if self.index.is_null() {
+            index = self.grow_for::<T>();
+            chunks = unsafe{&mut (*self.index)};
+        } else {
+            chunks = unsafe{&mut (*self.index)};
+            index = match chunks.chunk_for_place::<T>() {
+                Some(index) => index,
+                None => self.grow_for::<T>()
+            }
+        }
 
         // place data
         let chunk = chunks.chunk_at(index);

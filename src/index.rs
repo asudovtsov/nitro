@@ -136,13 +136,14 @@ impl Index {
     }
 
     pub fn drop_index(index: *mut Index) {
-        unsafe { index.drop_in_place(); }
-
         let layout = Layout::new::<Index>();
         let Ok(layout) = layout.align_to(mem::align_of::<Index>()) else {
             todo!()
         };
 
-        unsafe { alloc::dealloc(index.cast(), layout); }
+        unsafe {
+            index.drop_in_place();
+            alloc::dealloc(index.cast(), layout);
+        }
     }
 }

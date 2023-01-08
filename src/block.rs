@@ -83,6 +83,10 @@ impl Block {
         self.counter
     }
 
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
     pub fn increment_counter(&mut self) {
         self.counter += 1;
     }
@@ -120,7 +124,8 @@ impl Block {
     }
 
     pub fn drop_block(block: *mut Block) {
-        assert_eq!(unsafe{&(*block)}.counter, 0);
+        assert!(!block.is_null());
+        assert!(unsafe{&(*block)}.counter <= 1);
         let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + unsafe{&(*block)}.capacity) else {
             todo!()
         };

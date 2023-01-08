@@ -1,5 +1,3 @@
-use std::alloc::Layout;
-use std::alloc;
 use std::mem;
 
 use crate::block::{Chunk, Block};
@@ -32,17 +30,11 @@ impl<T: std::fmt::Debug> ArenaBox<T> {
 
 impl<T> Drop for ArenaBox<T> {
     fn drop(&mut self) {
-        let layout = Layout::new::<T>();
-        let Ok(layout) = layout.align_to(mem::align_of::<T>()) else {
-            todo!()
-        };
-
+        let block;
         unsafe {
+            block = &mut *self.block;
             self.data.drop_in_place();
-            alloc::dealloc(self.data.cast(), layout);
         }
-
-        let block = unsafe{&mut (*self.block)};
 
         if block.counter() == 1 && !block.has_index() {
             Block::drop_block(block);

@@ -37,7 +37,6 @@ impl<T> RcData<T> {
 pub struct Arena {
     index: *mut Index,
     last: *mut Block,
-    last_block_capacity: usize,
 }
 
 impl Arena {
@@ -45,7 +44,6 @@ impl Arena {
         Arena {
             index: null_mut(),
             last: null_mut(),
-            last_block_capacity: 0,
         }
     }
 
@@ -61,7 +59,6 @@ impl Arena {
         Arena {
             index,
             last: block,
-            last_block_capacity: capacity,
         }
     }
 
@@ -111,7 +108,7 @@ impl Arena {
         }
 
         // place data
-        let chunk = chunks.chunk_at(index);
+        let chunk = chunks.remove_chunk_at(index);
         let offset = chunk.start().align_offset(mem::align_of::<T>());
         let block = chunk.block();
         let data;
@@ -134,16 +131,16 @@ impl Arena {
 
     fn grow_for<T>(&mut self) -> usize {
         if self.index.is_null() {
-            self.last_block_capacity = mem::size_of::<T>(); //#TODO process null sized types
+            //#TODO process null sized types
             self.index = Index::alloc_index();
-            let (block, chunk) = Block::alloc_block(null_mut(), self.index, self.last_block_capacity);
+            let (block, chunk) = Block::alloc_block(null_mut(), self.index, mem::size_of::<T>());
             self.last = block;
             return unsafe{&mut (*self.index)}.insert_free_chunk(chunk)
         }
 
         loop {
-            self.last_block_capacity *= 2;
-            let (block, chunk) = Block::alloc_block(self.last, self.index, self.last_block_capacity);
+            let capacity = unsafe{&(*self.last)}.capacity() * 2;
+            let (block, chunk) = Block::alloc_block(self.last, self.index, capacity);
             self.last = block;
             let chunks = unsafe{&mut (*self.index)};
             let index = chunks.insert_free_chunk(chunk);
@@ -162,14 +159,15 @@ impl Drop for Arena {
             let mut block_ptr = self.last;
             while !block_ptr.is_null() {
                 let block = unsafe{&mut (*block_ptr)};
-                block_ptr = block.prev();
 
                 if block.counter() == 0 {
                     Block::drop_block(block_ptr);
+                    block_ptr = block.prev();
                     continue;
                 }
 
                 block.reset_index();
+                block_ptr = block.prev();
             }
 
             Index::drop_index(self.index);

@@ -16,6 +16,10 @@ impl Index {
         &self.free_chunks[index]
     }
 
+    pub fn remove_chunk_at(&mut self, index: usize) -> Chunk {
+        self.free_chunks.remove(index)
+    }
+
     // finding a chunk with sufficient capacity using a lower bound algorithm
     pub fn lower_bound_free_capacity(&self, capacity: usize) -> Option<usize> {
         let mut left = 0;

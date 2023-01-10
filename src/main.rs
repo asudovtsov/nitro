@@ -1,14 +1,23 @@
-use nitro::arena::Arena;
-use nitro::arena_box::ArenaBox;
+// use nitro::arena::Arena;
+// use nitro::arena_box::ArenaBox;
 
 fn main() {
-    let mut arena = Arena::new();
-    let v0 = arena.place_box(0u8);
-    let v1 = arena.place_box(1.);
-    let v2 = arena.place_box(2usize);
-    let v3 = arena.place_box(String::from("Hello"));
-    v0.print();
-    v1.print();
-    v2.print();
-    v3.print();
+    // {
+    //     let mut arena = Arena::new();
+    //     let mut vec: Vec<ArenaBox<usize>> = vec![];
+    //     vec.reserve(100_000);
+    //     for i in 0..100_000 {
+    //         vec.push(arena.place_box(i));
+    //     }
+    // }
+
+    // {
+    //     let mut vec = vec![];
+    //     vec.reserve(100_000);
+    //     let now = std::time::Instant::now();
+    //     for i in 0..100_000 {
+    //         vec.push(Box::new(i));
+    //     }
+    //     println!("{}", now.elapsed().as_nanos());
+    // }
 }

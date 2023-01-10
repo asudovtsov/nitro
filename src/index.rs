@@ -463,46 +463,60 @@ impl AlignedMask {
 
 pub(crate) struct Chunk {
     addr: *mut u8,
-    next: *mut Chunk,
+    next: Option<Box<Chunk>>,
     capacity: usize,
 }
 
 impl Chunk {
-    pub fn new(addr: *mut u8, next: *mut Chunk, capacity: usize,) -> Self {
+    pub fn new(addr: *mut u8, next: Option<Box<Chunk>>, capacity: usize,) -> Self {
         Chunk {
             addr,
             next,
             capacity
         }
     }
+
+    pub fn is_following(&self, other: &Chunk) -> bool {
+        if self.addr.is_null() || other.addr.is_null() {
+            return false;
+        }
+        unsafe { self.addr.add(self.capacity) == other.addr }
+    }
+
+    pub fn is_can_place<T>(&self) -> bool {
+        let end = unsafe { self.addr.add(self.capacity) };
+        let type_offset = self.addr.align_offset(mem::align_of::<T>());
+        let type_end = unsafe { self.addr.add(type_offset + mem::size_of::<T>()) };
+        type_end <= end
+    }
 }
 
-struct UnsafeArray<T> {
-    data: *mut T
+struct ChunkUnsafeArray {
+    data: *mut Option<Box<Chunk>>
 }
 
-impl<T: Copy> UnsafeArray<T> {
-    pub fn from(size: usize, value: T) -> Self {
-        let Ok(layout) = Layout::array::<T>(size) else {
+impl ChunkUnsafeArray {
+    pub fn new(size: usize) -> Self {
+        let Ok(layout) = Layout::array::<Option<Box<Chunk>>>(size) else {
             todo!()
         };
 
-        let Ok(layout) = layout.align_to(mem::align_of::<*mut T>()) else {
+        let Ok(layout) = layout.align_to(mem::align_of::<Option<Box<Chunk>>>()) else {
             panic!("align error")
         };
 
         unsafe {
-            let data: *mut T = alloc::alloc(layout).cast();
+            let data: *mut Option<Box<Chunk>> = alloc::alloc(layout).cast();
             for i in 0..size {
-                data.add(i).write(value);
+                data.add(i).write(None);
             }
 
-            UnsafeArray { data }
+            ChunkUnsafeArray { data }
         }
     }
 
-    pub unsafe fn drop_array(array: &mut UnsafeArray<T>, size: usize) {
-        let Ok(layout) = Layout::array::<T>(size) else {
+    pub unsafe fn drop_array(array: &mut ChunkUnsafeArray, size: usize) {
+        let Ok(layout) = Layout::array::<Option<Box<Chunk>>>(size) else {
             todo!()
         };
 
@@ -515,27 +529,31 @@ impl<T: Copy> UnsafeArray<T> {
         alloc::dealloc(array.data.cast(), layout);
     }
 
-    pub unsafe fn set(&mut self, index: usize, value: T) {
+    pub unsafe fn take(&self, index: usize) -> Option<Box<Chunk>> {
+        std::mem::take(&mut *self.data.add(index).cast())
+    }
+
+    pub unsafe fn set(&mut self, index: usize, value: Option<Box<Chunk>>) {
         self.data.add(index).write(value);
     }
 
-    pub unsafe fn index(&self, index: usize) -> &T {
+    pub unsafe fn index(&self, index: usize) -> &Option<Box<Chunk>> {
         &*self.data.add(index).cast()
     }
 
-    pub unsafe fn index_mut(&mut self, index: usize) -> &mut T {
+    pub unsafe fn index_mut(&mut self, index: usize) -> &mut Option<Box<Chunk>> {
         &mut *self.data.add(index).cast()
     }
 }
 
-impl<T: Copy> UnsafeArray<T> {
-    pub unsafe fn get(&self, index: usize) -> T {
-        *self.data.add(index).cast()
-    }
-}
+// impl<T: Copy> ChunkUnsafeArray<T> {
+//     pub unsafe fn get(&self, index: usize) -> T {
+//         *self.data.add(index).cast()
+//     }
+// }
 
 pub(crate) struct Index {
-    data: UnsafeArray<*mut Chunk>,
+    data: ChunkUnsafeArray,
     mask: AlignedMask,
     chunk_count: usize
 }
@@ -545,7 +563,7 @@ impl Index {
         //#TODO replace with usize::div_ceil
         let mask_part_count = chunk_count / BYTES_PER_PART + usize::from(chunk_count.wrapping_rem(BYTES_PER_PART) != 0);
 
-        let data = UnsafeArray::from(chunk_count, null_mut());
+        let data = ChunkUnsafeArray::new(chunk_count);
         let mask = AlignedMask::new(mask_part_count);
         let layout = Layout::new::<Index>();
         unsafe {
@@ -560,32 +578,31 @@ impl Index {
         assert!(!index.is_null());
         let layout = Layout::new::<Index>();
         unsafe {
-            UnsafeArray::<*mut Chunk>::drop_array(&mut (*index).data, (*index).chunk_count);
+            ChunkUnsafeArray::drop_array(&mut (*index).data, (*index).chunk_count);
             index.drop_in_place();
             alloc::dealloc(index.cast(), layout);
         }
     }
 
-    pub unsafe fn add_chunk(&mut self, chunk: *mut Chunk) {
-        assert!(!chunk.is_null());
-        let index = (*chunk).capacity;
-        let current = self.data.get(index);
-        self.data.set(index, chunk);
-        (*chunk).next = current;
+    pub unsafe fn add_chunk(&mut self, chunk: Option<Box<Chunk>>) {
+        let mut r#box = chunk.expect("can't add None as chunk");
+        let index = r#box.capacity;
+        let current = self.data.take(index);
+        r#box.next = current;
+        self.data.set(index, Some(r#box));
     }
 
-    pub unsafe fn take_chunk(&mut self, index: usize) -> *mut Chunk {
+    pub unsafe fn take_chunk(&mut self, index: usize) -> Option<Box<Chunk>>{
         assert!(index < self.chunk_count);
-        let current = self.data.get(index);
-        if !current.is_null() {
-            self.data.set(index, (*current).next);
-            (*current).next = null_mut();
-            return current;
+        let current = self.data.take(index);
+        if let Some(mut r#box) = current {
+            self.data.set(index, std::mem::take(&mut r#box.next));
+            return Some(r#box);
         }
 
         if let Some(bigger_capacity) = unsafe { self.mask.next_one(index) } {
             return self.take_chunk(bigger_capacity)
         }
-        null_mut()
+        None
     }
 }

@@ -483,7 +483,7 @@ impl Chunk {
         unsafe { self.addr.add(self.capacity) == other.addr }
     }
 
-    pub fn is_can_place<T>(&self) -> bool {
+    pub fn is_suitable_for_store<T>(&self) -> bool {
         let end = unsafe { self.addr.add(self.capacity) };
         let type_offset = self.addr.align_offset(mem::align_of::<T>());
         let type_end = unsafe { self.addr.add(type_offset + mem::size_of::<T>()) };
@@ -584,8 +584,10 @@ impl Index {
         }
     }
 
-    pub unsafe fn add_chunk(&mut self, chunk: Option<Box<Chunk>>) {
+    pub unsafe fn insert_chunk(&mut self, index: usize, chunk: Option<Box<Chunk>>) {
         let mut r#box = chunk.expect("can't add None as chunk");
+        assert_eq!(index, r#box.capacity);
+
         let index = r#box.capacity;
         let current = self.data.take(index);
         r#box.next = current;
@@ -593,15 +595,21 @@ impl Index {
     }
 
     pub unsafe fn take_chunk(&mut self, index: usize) -> Option<Box<Chunk>>{
-        assert!(index < self.chunk_count);
-        let current = self.data.take(index);
+        self.data.take(index)
+    }
+
+    pub unsafe fn take_suitable_chunk<T>(&mut self, capacity: usize) -> Option<Box<Chunk>>{
+        assert!(capacity < self.chunk_count);
+        let current = self.data.take(capacity);
         if let Some(mut r#box) = current {
-            self.data.set(index, std::mem::take(&mut r#box.next));
-            return Some(r#box);
+            if (r#box.is_suitable_for_store::<T>()) {
+                self.data.set(capacity, std::mem::take(&mut r#box.next));
+                return Some(r#box);
+            }
         }
 
-        if let Some(bigger_capacity) = unsafe { self.mask.next_one(index) } {
-            return self.take_chunk(bigger_capacity)
+        if let Some(bigger_capacity) = unsafe { self.mask.next_one(capacity) } {
+            return self.take_suitable_chunk(bigger_capacity)
         }
         None
     }

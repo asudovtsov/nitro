@@ -105,28 +105,26 @@ impl Block {
     //     unsafe{&mut (*self.index)}.merge_insert_free_chunk(chunk);
     // }
 
-    // pub fn alloc_block(prev: *mut Block, index: *mut Index, capacity: usize) -> (*mut Block, Chunk) {
-    //     assert!(!index.is_null());
-    //     assert!(capacity != 0);
-    //     let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + capacity) else {
-    //         panic!("capacity overflow")
-    //     };
+    pub fn alloc_block(prev: *mut Block, index: *mut Index, capacity: usize) -> (*mut Block, Chunk) {
+        assert!(!index.is_null());
+        assert!(capacity != 0);
+        let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + capacity) else {
+            panic!("capacity overflow")
+        };
 
-    //     let Ok(layout) = layout.align_to(mem::align_of::<Block>()) else {
-    //         panic!("align error")
-    //     };
+        let Ok(layout) = layout.align_to(mem::align_of::<Block>()) else {
+            panic!("align error")
+        };
 
-    //     unsafe {
-    //         let block: *mut Block = alloc::alloc(layout).cast();
-    //         assert_eq!(block.align_offset(mem::align_of::<Block>()), 0);
-    //         block.write(Block {prev, index, counter: 0, capacity});
-    //         // println!("#alloc_block block {:?} prev {:?}", block, prev);
-    //         (block, Chunk::new(block.add(1).cast(), null_mut(), capacity))
-    //     }
-    // }
+        unsafe {
+            let block: *mut Block = alloc::alloc(layout).cast();
+            assert_eq!(block.align_offset(mem::align_of::<Block>()), 0);
+            block.write(Block {prev, index, counter: 0, capacity});
+            (block, Chunk::new(block.add(1).cast(), None, capacity))
+        }
+    }
 
     pub fn drop_block(block: *mut Block) {
-        // println!("#drop_block {:?}", block);
         assert!(!block.is_null());
         assert!(unsafe{&(*block)}.counter <= 1);
         let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + unsafe{&(*block)}.capacity) else {

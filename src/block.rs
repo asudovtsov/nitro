@@ -3,7 +3,7 @@ use std::ptr::null_mut;
 use std::alloc::Layout;
 use std::alloc;
 
-use crate::index::{Index, Chunk};
+use crate::index::{FlatCapPlcIndex, Chunk};
 
 // #[derive(Debug, PartialEq)]
 // pub(crate) struct Chunk {
@@ -64,7 +64,7 @@ use crate::index::{Index, Chunk};
 
 pub(crate) struct Block{
     prev: *mut Block,
-    index: *mut Index,
+    index: *mut FlatCapPlcIndex,
     counter: usize,
     capacity: usize,
 }
@@ -105,7 +105,7 @@ impl Block {
     //     unsafe{&mut (*self.index)}.merge_insert_free_chunk(chunk);
     // }
 
-    pub fn alloc_block(prev: *mut Block, index: *mut Index, capacity: usize) -> (*mut Block, Chunk) {
+    pub fn alloc_block(prev: *mut Block, index: *mut FlatCapPlcIndex, capacity: usize) -> (*mut Block, Chunk) {
         assert!(!index.is_null());
         assert!(capacity != 0);
         let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block>() + capacity) else {

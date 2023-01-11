@@ -3,7 +3,7 @@ use std::mem;
 use std::rc::Rc;
 
 use crate::block::Block;
-use crate::index::Index;
+use crate::index::FlatCapPlcIndex;
 // use crate::arena_box::ArenaBox;
 
 struct RcData<T> {
@@ -56,7 +56,7 @@ pub struct Builder {
 // }
 
 pub struct Arena {
-    index: *mut Index,
+    index: *mut FlatCapPlcIndex,
     last: *mut Block,
 }
 

@@ -98,7 +98,7 @@ impl<T> UnsafeArray<T> {
 }
 
 impl<T: Clone> UnsafeArray<T> {
-    pub fn from(size: usize, value: T) -> Self {
+    pub fn new(size: usize, value: T) -> Self {
         let Ok(layout) = Layout::array::<T>(size) else {
             todo!()
         };
@@ -152,19 +152,30 @@ impl<T: Clone> UnsafeTable<T> {
     pub fn from(row_count: usize, column_count: usize, value: T) -> Self {
         let mut rows = UnsafeArray::uninit(row_count);
         for row in 0..row_count {
-            unsafe { rows.set(row, UnsafeArray::from(column_count, value.clone())); }
+            unsafe { rows.set(row, UnsafeArray::new(column_count, value.clone())); }
         }
 
         UnsafeTable { data: rows }
     }
 }
 
+type OptNode<T> = Option<NonNull<Node<T>>>;
+
 struct Node<T> {
-    next: Option<NonNull<Node<T>>>,
+    prev: OptNode<T>,
+    next: OptNode<T>,
     value: T,
 }
 
 impl<T> Node<T> {
+    fn new(prev: OptNode<T>, next: OptNode<T>, value: T) -> Self {
+        Node {
+            prev,
+            next,
+            value
+        }
+    }
+
     fn unwrap(self) -> T {
         self.value
     }
@@ -173,34 +184,91 @@ impl<T> Node<T> {
         self.value
     }
 
-    fn take_next(&mut self) -> T {
-
+    fn as_mut(&mut self) -> &mut T {
+        &mut self.value
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct LinkedList<T> {
-    head: Option<NonNull<Node<T>>>
+    head: OptNode<T>
 }
 
-impl<T: Default> LinkedList<T> {
-    fn new() -> Self {
+impl<T> LinkedList<T> {
+    pub fn new() -> Self {
         LinkedList {
             head: None
         }
     }
 
-    fn push_front(&mut self, value: T) {
+    pub fn push_front(&mut self, value: T) {
         let next = std::mem::take(&mut self.head);
-        let ptr = Box::leak(Box::new(Node { next, value }));
+        let ptr = Box::leak(Box::new(Node::new(None, next, value)));
         self.head = Some(unsafe {NonNull::new_unchecked(ptr)});
     }
 
-    fn pop_front(&mut self) -> Option<T> {
+    pub fn pop_front(&mut self) -> Option<T> {
         let option = std::mem::take(&mut self.head);
         option?;
 
         let mut node = unsafe{Box::from_raw(option.unwrap().as_ptr())};
         self.head = std::mem::take(&mut node.next);
         Some(node.into_value())
+    }
+
+    pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
+        CursorMut { current: self.head, list: self }
+    }
+}
+
+pub(crate) struct CursorMut<'a, T> {
+    current: OptNode<T>,
+    list: &'a mut LinkedList<T>,
+}
+
+impl<'a, T> CursorMut<'a, T> {
+    pub fn current(&mut self) -> Option<&mut T> {
+        if let Some(non_null) = self.current.as_mut() {
+            return Some(unsafe{non_null.as_mut().as_mut()})
+        }
+        None
+    }
+
+    pub fn move_next(&mut self) {
+        match self.current.take() {
+            Some(current) => unsafe {
+                self.current = current.as_ref().next;
+            },
+            None => {
+                self.current = self.list.head;
+            }
+        }
+    }
+
+    pub fn remove_current(&mut self) -> Option<T> {
+        let current_mut = unsafe { self.current?.as_mut() };
+        let prev = current_mut.prev;
+        let next = current_mut.next;
+        match prev {
+            Some(mut non_null) => unsafe { non_null.as_mut().next = next; },
+            None => { self.list.head = next; }
+        }
+        unsafe { Some(Box::from_raw(current_mut).into_value()) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::{LinkedList, CursorMut};
+
+    #[test]
+    fn it_works() {
+        let mut list = LinkedList::new();
+        list.push_front("!");
+        list.push_front("World");
+        list.push_front("Hello ");
+
+        let mut cursor = list.cursor_front_mut();
+        cursor.move_next();
     }
 }

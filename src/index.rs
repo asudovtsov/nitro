@@ -3,6 +3,7 @@ use std::alloc;
 
 use crate::common::UnsafeArray;
 use crate::common::UnsafeTable;
+use crate::common::LinkedList;
 
 type PartType = usize;
 
@@ -72,7 +73,7 @@ pub(crate) struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(addr: *mut u8, next: Option<Box<Chunk>>, capacity: usize,) -> Self {
+    pub fn new(addr: *mut u8, next: Option<Box<Chunk>>, capacity: usize) -> Self {
         Chunk {
             addr,
             next,
@@ -87,17 +88,28 @@ impl Chunk {
         unsafe { self.addr.add(self.capacity) == other.addr }
     }
 
-    pub fn is_can_place<T>(&self) -> bool {
-        let end = unsafe { self.addr.add(self.capacity) };
-        let type_offset = self.addr.align_offset(mem::align_of::<T>());
-        let type_end = unsafe { self.addr.add(type_offset + mem::size_of::<T>()) };
-        type_end <= end
+    // pub fn is_can_place<T>(&self) -> bool {
+    //     let end = unsafe { self.addr.add(self.capacity) };
+    //     let type_offset = self.addr.align_offset(mem::align_of::<T>());
+    //     let type_end = unsafe { self.addr.add(type_offset + mem::size_of::<T>()) };
+    //     type_end <= end
+    // }
+
+    pub fn is_can_place(&self, capacity: usize, align: usize) -> bool {
+        todo!()
+        // let end = unsafe { self.addr.add(self.capacity) };
+        // let type_offset = self.addr.align_offset(mem::align_of::<T>());
+        // let type_end = unsafe { self.addr.add(type_offset + mem::size_of::<T>()) };
+        // type_end <= end
     }
 }
 
+// capacity --------------->
+// |0....................63|
+
 //#TODO
-trait FlatCapTake {
-    fn flat_take(&mut self, index: &mut FlatCapPlcIndex, capacity: usize) -> Option<Box<Chunk>>;
+pub(crate) trait FlatCapTake {
+    fn flat_take(&mut self, index: &mut FlatCapPlcIndex, capacity: usize, align: usize) -> Option<Box<Chunk>>;
 }
 
 struct FlatCapEc {} // starts from EXACT capacity, increment CHUNK
@@ -108,15 +120,16 @@ struct FlatCapAc {} // starts from ALIGNED capacity, decrement CHUNK
 struct FlatCapAi {} // starts from ALIGNED capacity, decrement INDEX
 
 impl FlatCapTake for FlatCapEc {
-    fn flat_take(&mut self, index: &mut FlatCapPlcIndex, capacity: usize) -> Option<Box<Chunk>> {
+    fn flat_take(&mut self, index: &mut FlatCapPlcIndex, capacity: usize, align: usize) -> Option<Box<Chunk>> {
         None
+        // index.data.index_mut(capacity)
     }
 }
 
-type ChunkUnsafeArray = UnsafeArray<Option<Box<Chunk>>>;
+type ChunkArray = UnsafeArray<LinkedList<Chunk>>;
 
 pub(crate) struct FlatCapPlcIndex {
-    data: ChunkUnsafeArray,
+    data: ChunkArray,
     mask: AlignedMask,
     chunk_count: usize,
     flat_take: Box<dyn FlatCapTake>,
@@ -124,10 +137,10 @@ pub(crate) struct FlatCapPlcIndex {
 
 impl FlatCapPlcIndex {
     pub fn alloc_index(chunk_count: usize, flat_take: Box<dyn FlatCapTake>) -> *mut FlatCapPlcIndex {
-        //#TODO replace with usize::div_ceil
+        //#TODO replace with chunk_count.div_ceil(BYTES_PER_PART)
         let mask_part_count = chunk_count / BYTES_PER_PART + usize::from(chunk_count.wrapping_rem(BYTES_PER_PART) != 0);
 
-        let data = ChunkUnsafeArray::from(chunk_count, None);
+        let data = ChunkArray::new(chunk_count, LinkedList::new());
         let mask = AlignedMask::new(mask_part_count);
         let layout = Layout::new::<FlatCapPlcIndex>();
         unsafe {
@@ -142,7 +155,7 @@ impl FlatCapPlcIndex {
         assert!(!index.is_null());
         let layout = Layout::new::<FlatCapPlcIndex>();
         unsafe {
-            ChunkUnsafeArray::drop_array(&mut (*index).data, (*index).chunk_count);
+            ChunkArray::drop_array(&mut (*index).data, (*index).chunk_count);
             index.drop_in_place();
             alloc::dealloc(index.cast(), layout);
         }
@@ -159,23 +172,24 @@ impl FlatCapPlcIndex {
     }
 
     pub unsafe fn take_chunk_for<T>(&mut self) -> Option<Box<Chunk>> {
-        let mut capacity = mem::size_of::<T>();
-        assert!(capacity < self.chunk_count);
+        todo!()
+        // let mut capacity = mem::size_of::<T>();
+        // assert!(capacity < self.chunk_count);
 
-        loop {
-            if let Some(r#box) = self.data.index(capacity) {
-                if r#box.is_can_place::<T>() {
-                    let mut chunk = self.data.replace(capacity, None).unwrap();
-                    self.data.set(capacity, std::mem::take(&mut chunk.next));
-                    return Some(chunk);
-                }
-            }
+        // loop {
+        //     if let Some(r#box) = self.data.index(capacity) {
+        //         if r#box.is_can_place::<T>() {
+        //             let mut chunk = self.data.replace(capacity, None).unwrap();
+        //             self.data.set(capacity, std::mem::take(&mut chunk.next));
+        //             return Some(chunk);
+        //         }
+        //     }
 
-            capacity = match unsafe { self.mask.next_one(capacity) } {
-                Some(bigger_capacity) => bigger_capacity,
-                None => return None
-            }
-        }
+        //     capacity = match unsafe { self.mask.next_one(capacity) } {
+        //         Some(bigger_capacity) => bigger_capacity,
+        //         None => return None
+        //     }
+        // }
     }
 
     unsafe fn for_each_in_list<F>(from: &mut Option<Box<Chunk>>, f: F) where F: Fn(&mut Option<Box<Chunk>>) {
@@ -221,14 +235,13 @@ impl FlatCapPlcIndex {
 //  V 8 |0....................63|
 pub(crate) struct TableCapAlignPlcIndex {}
 
-// (block_index).div_rem(index_row_count)
+// block_h_index = (block_index).div_rem(table_row_count) // h_index means hashed index
 //  |
 //  |   chunk_index ------------>
 //  | 0 |0....................63|
 //  | 1 |0....................63|
 //  | . |0....................63|
 //  V n |0....................63|
-
 pub(crate) struct TableAddrMrgIndex {}
 
 pub(crate) struct Matrix4dCapAlignAddrPlcMrgIndex {} // TableCapAlignPlcIndex + TableAddrMrgIndex

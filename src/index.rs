@@ -483,7 +483,7 @@ impl Chunk {
         unsafe { self.addr.add(self.capacity) == other.addr }
     }
 
-    pub fn is_suitable_for_store<T>(&self) -> bool {
+    pub fn is_can_place<T>(&self) -> bool {
         let end = unsafe { self.addr.add(self.capacity) };
         let type_offset = self.addr.align_offset(mem::align_of::<T>());
         let type_end = unsafe { self.addr.add(type_offset + mem::size_of::<T>()) };
@@ -531,6 +531,10 @@ impl ChunkUnsafeArray {
 
     pub unsafe fn take(&self, index: usize) -> Option<Box<Chunk>> {
         std::mem::take(&mut *self.data.add(index).cast())
+    }
+
+    pub unsafe fn get(&self, index: usize) -> &Option<Box<Chunk>> {
+        &*self.data.add(index).cast()
     }
 
     pub unsafe fn set(&mut self, index: usize, value: Option<Box<Chunk>>) {
@@ -594,23 +598,23 @@ impl Index {
         self.data.set(index, Some(r#box));
     }
 
-    pub unsafe fn take_chunk(&mut self, index: usize) -> Option<Box<Chunk>>{
-        self.data.take(index)
-    }
-
-    pub unsafe fn take_suitable_chunk<T>(&mut self, capacity: usize) -> Option<Box<Chunk>>{
+    pub unsafe fn take_chunk_for<T>(&mut self) -> Option<Box<Chunk>> {
+        let mut capacity = mem::size_of::<T>();
         assert!(capacity < self.chunk_count);
-        let current = self.data.take(capacity);
-        if let Some(mut r#box) = current {
-            if (r#box.is_suitable_for_store::<T>()) {
-                self.data.set(capacity, std::mem::take(&mut r#box.next));
-                return Some(r#box);
+
+        loop {
+            if let Some(r#box) = self.data.get(capacity) {
+                if r#box.is_can_place::<T>() {
+                    let mut chunk = self.data.take(capacity).unwrap();
+                    self.data.set(capacity, std::mem::take(&mut chunk.next));
+                    return Some(chunk);
+                }
+            }
+
+            capacity = match unsafe { self.mask.next_one(capacity) } {
+                Some(bigger_capacity) => bigger_capacity,
+                None => return None
             }
         }
-
-        if let Some(bigger_capacity) = unsafe { self.mask.next_one(capacity) } {
-            return self.take_suitable_chunk(bigger_capacity)
-        }
-        None
     }
 }

@@ -36,24 +36,24 @@ pub struct Builder {
     arena: Arena
 }
 
-impl Builder {
-    fn block_capacity(self, capacity_in_bytes: usize) -> Self {
+// impl Builder {
+//     fn block_capacity(self, capacity_in_bytes: usize) -> Self {
 
-    }
+//     }
 
-    fn block_count(self, count: usize) -> Self {
+//     fn block_count(self, count: usize) -> Self {
 
-    }
+//     }
 
-    //#TODO
-    // fn grow_factor(self, grow_factor: usize) -> Self {
+//     //#TODO
+//     // fn grow_factor(self, grow_factor: usize) -> Self {
 
-    // }
+//     // }
 
-    fn build(self) -> Arena {
-        self.arena
-    }
-}
+//     fn build(self) -> Arena {
+//         self.arena
+//     }
+// }
 
 pub struct Arena {
     index: *mut Index,

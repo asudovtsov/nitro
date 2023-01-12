@@ -22,15 +22,42 @@ impl Chunk64 {
         }
     }
 
-    pub fn block(&self) -> &Block64 {
-        unsafe {&*self.block}
+    pub fn capacity(&self) -> u8 {
+        self.capacity
     }
 
-    pub fn is_following(&self, other: &Chunk64) -> bool {
+    pub fn block_index(&self) -> usize {
+        unsafe {&*self.block}.block_index()
+    }
+
+    pub fn try_consume_next(&mut self, other: &mut Chunk64) -> bool {
+        if self.is_next_neighbour(&other) {
+            self.capacity += other.capacity;
+            other.capacity = 0;
+            return true
+        }
+        false
+    }
+
+    pub fn try_consume_prev(&mut self, other: &mut Chunk64) -> bool {
+        if other.is_next_neighbour(&self) {
+            self.addr = other.addr;
+            self.capacity += other.capacity;
+            other.capacity = 0;
+            return true
+        }
+        false
+    }
+
+    pub fn is_next_neighbour(&self, other: &Chunk64) -> bool {
         if self.addr.is_null() || other.addr.is_null() {
             return false;
         }
         unsafe { self.addr.add(self.capacity as _) == other.addr }
+    }
+
+    pub fn is_block_neighbour(&self, other: &Chunk64) -> bool {
+        self.block == other.block
     }
 
     pub fn is_can_place(&self, size: usize, align: usize) -> bool {
@@ -46,10 +73,10 @@ type CapacityArray = RawArray<Option<Chunk64>>; //#TODO RawArray<StableStack<Chu
 pub(crate) struct Index64 { //#TODO bring to RawIndex by removing block_capacity
     table: CapacityArray,//#TODO RawArray<StableStack<Chunk>>
     mask: Mask64,
-    block_to_capacity: Vec<Option<usize>>,
-    free_list: LinkedList<Chunk64>,
+    block_idx_to_table: Vec<Option<usize>>,
+    empty_chunks: LinkedList<Chunk64>,
+    drain: Option<Chunk64>,
     block_capacity: u8,
-    drain: Option<Chunk64>
     // flat_take: Box<dyn FlatCapTake>,
 }
 
@@ -63,10 +90,10 @@ impl Index64 {
             index.write(Index64{
                 table: CapacityArray::default_filled((block_capacity - 1) as _),
                 mask: Mask64::new(),
-                block_to_capacity: vec![None; block_count],
-                free_list: LinkedList::new(),
+                block_idx_to_table: vec![None; block_count],
+                empty_chunks: LinkedList::new(),
+                drain: None,
                 block_capacity,
-                drain: None, //#TODO set on first block
             });
             index
         }
@@ -82,48 +109,78 @@ impl Index64 {
         }
     }
 
-    pub fn add_chunk(&mut self, chunk: Chunk64) {
+    pub fn add_chunk(&mut self, mut chunk: Chunk64) {
         assert_ne!(chunk.capacity, 0);
         assert!(chunk.capacity <= self.block_capacity);
 
-        // set chunk as drain
-        if self.drain.is_none() {
-            self.drain = Some(chunk);
-            return;
+        match self.drain {
+            Some(ref mut drain) => {
+                if drain.try_consume_next(&mut chunk)
+                    || drain.try_consume_prev(&mut chunk) {
+                    return;
+                }
+
+                if drain.capacity < chunk.capacity {
+                    // if self.table.index(drain.capacity).is_none() {
+
+                    // }
+                    //#TODO
+                    // push drain to table free cell
+                    // drain = chunk
+                }
+            },
+            None => {
+                mem::swap(&mut self.drain, &mut Some(chunk));
+                return;
+            },
         }
 
-        // push chunk of empty block in free_list
+        // // set chunk as drain
+        // if self.drain.is_none() {
+        //     self.drain = Some(chunk);
+        //     return;
+        // }
+
+        // if matches!(self.drain, Some(ref d) if d.is_from_same_block(&chunk)) {
+        //     if d()
+        // }
+
+        // push chunk of empty block in empty list
         let block_capacity = 64;
         if chunk.capacity == block_capacity {
-            let block_index = chunk.block().block_index();
-            if let Some(capacity) = self.map_to_capacity(block_index) {
-                std::mem::take(&mut self.block_to_capacity[block_index]);
+            let block_index = chunk.block_index();
+            if let Some(capacity) = self.map_to_table(block_index) {
+                std::mem::take(&mut self.block_idx_to_table[block_index]);
                 unsafe { self.table.set(capacity, None); }
-                self.mask.reset(capacity);
+                self.mask.reset(capacity as _);
             }
-            self.free_list.push_front(chunk);
+            //#TODO remove chunk from drain if is the same block
+            self.empty_chunks.push_front(chunk);
             return;
         }
 
         // push chunk in table if corresponding cell is free
         if unsafe { self.table.index(chunk.capacity as _).is_none() } {
-            let block_index = chunk.block().block_index();
-            match self.map_to_capacity(block_index) {
+            let block_index = chunk.block_index();
+            match self.map_to_table(block_index) {
                 Some(capacity) if capacity < chunk.capacity as _ => {
-                    self.block_to_capacity[block_index] = Some(chunk.capacity as _);
+                    self.block_idx_to_table[block_index] = Some(chunk.capacity as _);
                     unsafe {
+                        self.mask.set(chunk.capacity);
+                        self.mask.reset(capacity as _);
                         self.table.set(chunk.capacity as _, Some(chunk));
                         self.table.set(capacity, None);
-                        self.mask.reset(capacity);
                     }
                 },
                 None => {
-                    self.block_to_capacity[block_index] = Some(chunk.capacity as _);
+                    self.block_idx_to_table[block_index] = Some(chunk.capacity as _);
                     unsafe {
+                        self.mask.set(chunk.capacity);
                         self.table.set(chunk.capacity as _, Some(chunk));
                     }
                 },
                 _ => {},
+                //#TODO remove chunk from drain if is the same block
             }
         }
     }
@@ -136,23 +193,35 @@ impl Index64 {
 
         // try take chunk from table
         let mut cap_index = 63 - self.mask.trailing_zeros();
-        while cap_index >= size {
-            let chunk_opt = unsafe { self.table.index_mut(cap_index) };
+        while cap_index as _ >= size {
+            let chunk_opt = unsafe { self.table.index_mut(cap_index as _) };
             if matches!(chunk_opt, Some(chunk) if chunk.is_can_place(size, align)) {
                 return mem::take(chunk_opt);
             }
             cap_index -= 1;
         }
 
-        // try take chunk from free list
-        self.free_list.pop_front()
+        // try take chunk from empty list
+        self.empty_chunks.pop_front()
     }
 
-    fn map_to_capacity(&mut self, block_index: usize) -> Option<usize> {
-        if block_index < self.block_to_capacity.len() {
-            self.block_to_capacity[block_index]
+    fn map_to_table(&mut self, block_index: usize) -> Option<usize> {
+        if block_index < self.block_idx_to_table.len() {
+            self.block_idx_to_table[block_index]
         } else {
             None
         }
+    }
+
+    fn upgrade_drain(&mut self, chunk: Chunk64) -> Result<(), Chunk64> {
+        todo!()
+    }
+
+    fn insert_to_table(&mut self, chunk: Chunk64) -> Result<(), Chunk64> {
+        todo!()
+    }
+
+    fn push_to_empty_chunks(&mut self, chunk: Chunk64) -> Result<(), Chunk64> {
+        todo!()
     }
 }

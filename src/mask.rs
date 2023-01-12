@@ -76,30 +76,30 @@ impl Mask64 {
         }
     }
 
-    pub fn trailing_zeros(&self) -> usize {
+    pub fn trailing_zeros(&self) -> u8 {
         self.data.trailing_zeros() as _
     }
 
-    pub fn leading_zeros(&self) -> usize {
+    pub fn leading_zeros(&self) -> u8 {
         self.data.leading_zeros() as _
     }
 
-    pub fn unclamped_trailing_zeros(&self, bit_index: usize) -> usize {
+    pub fn unclamped_trailing_zeros(&self, bit_index: u8) -> u8 {
         assert!(bit_index < 64);
         (self.data << (64 - bit_index)).leading_zeros() as _
     }
 
-    pub fn unclamped_leading_zeros(&self, bit_index: usize) -> usize {
+    pub fn unclamped_leading_zeros(&self, bit_index: u8) -> u8 {
         assert!(bit_index < 64);
         (self.data >> (bit_index + 1)).trailing_zeros() as _
     }
 
-    pub fn set(&mut self, bit_index: usize) {
+    pub fn set(&mut self, bit_index: u8) {
         assert!(bit_index < 64);
         self.data |= 1u64 << bit_index;
     }
 
-    pub fn reset(&mut self, bit_index: usize) {
+    pub fn reset(&mut self, bit_index: u8) {
         assert!(bit_index < 64);
         self.data &= !(1u64 << bit_index);
     }

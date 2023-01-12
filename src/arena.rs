@@ -124,7 +124,7 @@ impl Arena64 {
         }
 
         if self.index.is_null() {
-            self.index = Index64::alloc_index();
+            self.index = Index64::alloc_index(block_count);
         }
 
         for i in 0..block_count {
@@ -132,6 +132,8 @@ impl Arena64 {
             unsafe { (*self.index).add_chunk(chunk); }
             self.last = block;
         }
+
+        //#TODO expand index.block_to_capacity
     }
 
     // pub fn place_box<T>(&mut self, value: T) -> ArenaBox<T> {

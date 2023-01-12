@@ -2,8 +2,8 @@ use std::ptr::null_mut;
 use std::mem;
 use std::rc::Rc;
 
-use crate::block::Block;
-use crate::index::FlatCapPlcIndex;
+use crate::block::Block64;
+use crate::index::Index64;
 // use crate::arena_box::ArenaBox;
 
 struct RcData<T> {
@@ -32,79 +32,107 @@ impl<T> RcData<T> {
 //     block_list: NonNull<BlockList>,
 // }
 
-pub struct Builder {
-    arena: Arena
+pub enum DefragLevel {
+    L0,
+    L1,
+    L2,
+    L3,
+    L4
 }
 
-// impl Builder {
-//     fn block_capacity(self, capacity_in_bytes: usize) -> Self {
-
-//     }
-
-//     fn block_count(self, count: usize) -> Self {
-
-//     }
-
-//     //#TODO
-//     // fn grow_factor(self, grow_factor: usize) -> Self {
-
-//     // }
-
-//     fn build(self) -> Arena {
-//         self.arena
-//     }
-// }
-
-pub struct Arena {
-    index: *mut FlatCapPlcIndex,
-    last: *mut Block,
+pub struct Builder64 {
+    block_count: usize,
+    grow_factor: usize,
+    defrag_level: DefragLevel,
 }
 
-impl Arena {
-    pub fn new() -> Self {
-        Arena {
-            index: null_mut(),
-            last: null_mut(),
+impl Builder64 {
+    fn new() -> Self {
+        Builder64 {
+            block_count: 0,
+            grow_factor: 1,
+            defrag_level: DefragLevel::L4,
         }
     }
 
-    pub fn with() -> Builder {
-        Builder { arena: Arena::new() }
+    fn block_count(mut self, block_count: usize) -> Self {
+        self.block_count = block_count;
+        self
     }
 
-    // pub fn with_capacity_in_bytes(capacity: usize) -> Self {
-    //     if capacity == 0 {
-    //         return Self::new();
-    //     }
+    fn grow_factor(mut self, grow_factor: usize) -> Self {
+        self.grow_factor = grow_factor;
+        self
+    }
 
-    //     let index = Index::alloc_index();
-    //     let (block, chunk) = Block::alloc_block(null_mut(), index, capacity);
-    //     unsafe{&mut (*index)}.insert_free_chunk(chunk);
+    fn defrag_level(mut self, defrag_level: DefragLevel) -> Self {
+        self.defrag_level = defrag_level;
+        self
+    }
 
-    //     Arena {
-    //         index,
-    //         last: block,
-    //     }
-    // }
+    fn build(self) -> Arena64 {
+        let mut arena = Arena64 {
+            index: null_mut(),
+            last: null_mut(),
+            grow_factor: self.grow_factor,
+            defrag_level: self.defrag_level,
+        };
+        arena.expand(self.block_count);
+        arena
+    }
+}
+
+pub struct Arena64 {
+    index: *mut Index64,
+    last: *mut Block64,
+    grow_factor: usize,
+    defrag_level: DefragLevel,
+}
+
+impl Arena64 {
+    pub fn new() -> Self {
+        Arena64 {
+            index: null_mut(),
+            last: null_mut(),
+            grow_factor: 1,
+            defrag_level: DefragLevel::L4,
+        }
+    }
+
+    pub fn with() -> Builder64 {
+        Builder64::new()
+    }
+
+    pub fn block_count(&self) -> usize {
+        let mut block = self.last;
+        let mut count = 0;
+        while !block.is_null() {
+            count += 1;
+            block = unsafe{&(*block)}.prev();
+        }
+        count
+    }
 
     // pub fn free_chunk_count(&self) -> usize {
     //     assert!(!self.index.is_null());
     //     unsafe{&(*self.index)}.len()
     // }
 
-    // pub fn block_count(&self) -> usize {
-    //     let mut block = self.last;
-    //     let mut count = 0;
-    //     while !block.is_null() {
-    //         count += 1;
-    //         block = unsafe{&(*block)}.prev();
-    //     }
-    //     count
-    // }
+    pub fn expand(&mut self, block_count: usize) {
+        if block_count == 0 {
+            return;
+        }
 
-    // // pub fn reserve(size: usize) {
-    // //     todo!();
-    // // }
+        if self.index.is_null() {
+            self.index = Index64::alloc_index();
+        }
+
+        for i in 0..block_count {
+            let (block, chunk) = Block64::alloc_block(i, self.last, self.index);
+            unsafe { (*self.index).add_chunk(chunk); }
+            self.last = block;
+        }
+    }
 
     // pub fn place_box<T>(&mut self, value: T) -> ArenaBox<T> {
     //     if mem::size_of::<T>() == 0 {
@@ -127,63 +155,44 @@ impl Arena {
 
     // pub fn shrink_to_fit(&mut self) { todo!() }
 
-    // fn place_internal<T>(&mut self, value: T) -> (*mut Block, *mut T) {
-    //     // get chunk to place data
-    //     let chunks;
-    //     let index;
-    //     if self.index.is_null() {
-    //         index = self.grow_for::<T>();
-    //         chunks = unsafe{&mut (*self.index)};
-    //     } else {
-    //         chunks = unsafe{&mut (*self.index)};
-    //         index = match chunks.chunk_for_place::<T>() {
-    //             Some(index) => index,
-    //             None => self.grow_for::<T>()
-    //         }
-    //     }
+    fn place_internal<T>(&mut self, value: T) -> (*mut Block64, *mut T) {
+        // get chunk to place data
 
-    //     // place data
-    //     let chunk = chunks.remove_chunk_at(index);
-    //     let offset = chunk.start().align_offset(mem::align_of::<T>());
-    //     let block = chunk.block();
-    //     let data;
-    //     unsafe {
-    //         let start = chunk.start().add(offset).cast::<T>();
-    //         start.write(value);
-    //         data = start;
-    //     }
+        todo!()
+        // let chunks;
+        // let index;
+        // if self.index.is_null() {
+        //     index = self.grow_for::<T>();
+        //     chunks = unsafe{&mut (*self.index)};
+        // } else {
+        //     chunks = unsafe{&mut (*self.index)};
+        //     index = match chunks.chunk_for_place::<T>() {
+        //         Some(index) => index,
+        //         None => self.grow_for::<T>()
+        //     }
+        // }
 
-    //     // return unoccupied mem to index
-    //     let occupied = offset + mem::size_of::<T>();
-    //     if occupied < chunk.capacity() {
-    //         let start = unsafe { chunk.start().add(occupied) };
-    //         let chunk = Chunk::new(chunk.block(), start, chunk.capacity() - occupied);
-    //         chunks.merge_insert_free_chunk(chunk);
-    //     }
+        // // place data
+        // let chunk = chunks.remove_chunk_at(index);
+        // let offset = chunk.start().align_offset(mem::align_of::<T>());
+        // let block = chunk.block();
+        // let data;
+        // unsafe {
+        //     let start = chunk.start().add(offset).cast::<T>();
+        //     start.write(value);
+        //     data = start;
+        // }
 
-    //     (block, data)
-    // }
+        // // return unoccupied mem to index
+        // let occupied = offset + mem::size_of::<T>();
+        // if occupied < chunk.capacity() {
+        //     let start = unsafe { chunk.start().add(occupied) };
+        //     let chunk = Chunk::new(chunk.block(), start, chunk.capacity() - occupied);
+        //     chunks.merge_insert_free_chunk(chunk);
+        // }
 
-    // fn grow_for<T>(&mut self) -> usize {
-    //     if self.index.is_null() {
-    //         //#TODO process null sized types
-    //         self.index = Index::alloc_index();
-    //         let (block, chunk) = Block::alloc_block(null_mut(), self.index, mem::size_of::<T>());
-    //         self.last = block;
-    //         return unsafe{&mut (*self.index)}.insert_free_chunk(chunk)
-    //     }
-
-    //     loop {
-    //         let capacity = unsafe{&(*self.last)}.capacity() * 2;
-    //         let (block, chunk) = Block::alloc_block(self.last, self.index, capacity);
-    //         self.last = block;
-    //         let chunks = unsafe{&mut (*self.index)};
-    //         let index = chunks.insert_free_chunk(chunk);
-    //         if chunks.chunk_at(index).is_can_place::<T>() {
-    //             break index;
-    //         }
-    //     }
-    // }
+        // (block, data)
+    }
 }
 
 // impl Drop for Arena {

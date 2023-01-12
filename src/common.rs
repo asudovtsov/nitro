@@ -1,7 +1,7 @@
 use std::alloc::Layout;
 use std::alloc;
-use std::ptr::NonNull;
-use std::fmt;
+use std::ptr::{NonNull, null_mut};
+use std::mem;
 
 // #[derive(Debug, Copy, Clone)]
 // pub(crate) struct Strict<T> {
@@ -45,36 +45,26 @@ use std::fmt;
 //     }
 // }
 
-pub(crate) struct UnsafeArray<T> {
+pub(crate) struct RawArray<T> {
     data: *mut T
 }
 
-impl<T> UnsafeArray<T> {
+impl<T> RawArray<T> {
     pub fn uninit(size: usize) -> Self {
         let Ok(layout) = Layout::array::<T>(size) else {
             todo!()
         };
 
-        //#TODO is it necessary?
-        // let Ok(layout) = layout.align_to(mem::align_of::<T>()) else {
-        //     panic!("align error")
-        // };
-
         unsafe {
             let data: *mut T = alloc::alloc(layout).cast();
-            UnsafeArray { data }
+            RawArray { data }
         }
     }
 
-    pub unsafe fn drop_array(array: &mut UnsafeArray<T>, size: usize) {
+    pub unsafe fn drop_array(array: &mut RawArray<T>, size: usize) {
         let Ok(layout) = Layout::array::<T>(size) else {
             todo!()
         };
-
-        //#TODO is it necessary?
-        // let Ok(layout) = layout.align_to(mem::align_of::<T>()) else {
-        //     panic!("align error")
-        // };
 
         array.data.drop_in_place();
         alloc::dealloc(array.data.cast(), layout);
@@ -93,71 +83,66 @@ impl<T> UnsafeArray<T> {
     }
 
     pub unsafe fn replace(&mut self, index: usize, value: T) -> T {
-        std::mem::replace(&mut *self.data.add(index).cast(), value)
+        mem::replace(&mut *self.data.add(index).cast(), value)
     }
 }
 
-impl<T: Clone> UnsafeArray<T> {
-    pub fn new(size: usize, value: T) -> Self {
+impl<T: Default> RawArray<T> {
+    pub fn default_filled(size: usize) -> Self {
         let Ok(layout) = Layout::array::<T>(size) else {
             todo!()
         };
 
-        //#TODO is it necessary?
-        // let Ok(layout) = layout.align_to(mem::align_of::<T>()) else {
-        //     panic!("align error")
-        // };
-
         unsafe {
             let data: *mut T = alloc::alloc(layout).cast();
             for i in 0..size {
-                data.add(i).write(value.clone());
+                data.add(i).write(T::default());
             }
 
-            UnsafeArray { data }
+            RawArray { data }
         }
     }
 }
 
-pub(crate) struct UnsafeTable<T> {
-    data: UnsafeArray<UnsafeArray<T>>
-}
+// pub(crate) struct RawTable<T> {
+//     data: RawArray<RawArray<T>>
+// }
 
-impl<T> UnsafeTable<T> {
-    pub unsafe fn drop_table(array: &mut UnsafeTable<T>, row_count: usize, column_count: usize) {
-        for row in 0..row_count {
-            UnsafeArray::<T>::drop_array(array.data.index_mut(row), column_count);
-        }
-        UnsafeArray::<UnsafeArray::<T>>::drop_array(&mut array.data, row_count)
-    }
+// impl<T> RawTable<T> {
+//     pub unsafe fn drop_table(array: &mut RawTable<T>, row_count: usize, column_count: usize) {
+//         for row in 0..row_count {
+//             RawArray::<T>::drop_array(array.data.index_mut(row), column_count);
+//         }
+//         RawArray::<RawArray::<T>>::drop_array(&mut array.data, row_count)
+//     }
 
-    pub unsafe fn index(&self, row: usize, column: usize) -> &T {
-        self.data.index(row).index(column)
-    }
+//     pub unsafe fn index(&self, row: usize, column: usize) -> &T {
+//         self.data.index(row).index(column)
+//     }
 
-    pub unsafe fn index_mut(&mut self, row: usize, column: usize) -> &mut T {
-        self.data.index_mut(row).index_mut(column)
-    }
+//     pub unsafe fn index_mut(&mut self, row: usize, column: usize) -> &mut T {
+//         self.data.index_mut(row).index_mut(column)
+//     }
 
-    pub unsafe fn set(&mut self, row: usize, column: usize, value: T) {
-        self.data.index_mut(row).set(column, value);
-    }
+//     pub unsafe fn set(&mut self, row: usize, column: usize, value: T) {
+//         self.data.index_mut(row).set(column, value);
+//     }
 
-    pub unsafe fn replace(&mut self, row: usize, column: usize, value: T) -> T {
-        self.data.index_mut(row).replace(column, value)
-    }
-}
+//     pub unsafe fn replace(&mut self, row: usize, column: usize, value: T) -> T {
+//         self.data.index_mut(row).replace(column, value)
+//     }
+// }
 
-impl<T: Clone> UnsafeTable<T> {
-    pub fn from(row_count: usize, column_count: usize, value: T) -> Self {
-        let mut rows = UnsafeArray::uninit(row_count);
-        for row in 0..row_count {
-            unsafe { rows.set(row, UnsafeArray::new(column_count, value.clone())); }
-        }
+// impl<T: Clone> RawTable<T> {
+//     pub fn from(row_count: usize, column_count: usize, value: T) -> Self {
+//         let mut rows = RawArray::uninit(row_count);
+//         for row in 0..row_count {
+//             unsafe { rows.set(row, RawArray::new(column_count, value.clone())); }
+//         }
 
-        UnsafeTable { data: rows }
-    }
-}
+//         RawTable { data: rows }
+//     }
+// }
 
 type OptNode<T> = Option<NonNull<Node<T>>>;
 
@@ -202,17 +187,17 @@ impl<T> LinkedList<T> {
     }
 
     pub fn push_front(&mut self, value: T) {
-        let next = std::mem::take(&mut self.head);
+        let next = mem::take(&mut self.head);
         let ptr = Box::leak(Box::new(Node::new(None, next, value)));
         self.head = Some(unsafe {NonNull::new_unchecked(ptr)});
     }
 
     pub fn pop_front(&mut self) -> Option<T> {
-        let option = std::mem::take(&mut self.head);
+        let option = mem::take(&mut self.head);
         option?;
 
         let mut node = unsafe{Box::from_raw(option.unwrap().as_ptr())};
-        self.head = std::mem::take(&mut node.next);
+        self.head = mem::take(&mut node.next);
         Some(node.into_value())
     }
 

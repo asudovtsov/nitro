@@ -43,6 +43,7 @@ pub enum DefragLevel {
 pub struct Builder64 {
     block_count: usize,
     grow_factor: usize,
+    index_grow_factor: usize,
     defrag_level: DefragLevel,
 }
 
@@ -51,22 +52,28 @@ impl Builder64 {
         Builder64 {
             block_count: 0,
             grow_factor: 1,
+            index_grow_factor: 0,
             defrag_level: DefragLevel::L4,
         }
     }
 
-    fn block_count(mut self, block_count: usize) -> Self {
-        self.block_count = block_count;
+    fn block_count(mut self, count: usize) -> Self {
+        self.block_count = count;
         self
     }
 
-    fn grow_factor(mut self, grow_factor: usize) -> Self {
-        self.grow_factor = grow_factor;
+    fn grow_factor(mut self, factor: usize) -> Self {
+        self.grow_factor = factor;
         self
     }
 
-    fn defrag_level(mut self, defrag_level: DefragLevel) -> Self {
-        self.defrag_level = defrag_level;
+    fn index_grow_factor(mut self, factor: usize) -> Self {
+        self.grow_factor = factor;
+        self
+    }
+
+    fn defrag_level(mut self, level: DefragLevel) -> Self {
+        self.defrag_level = level;
         self
     }
 
@@ -75,9 +82,10 @@ impl Builder64 {
             index: null_mut(),
             last: null_mut(),
             grow_factor: self.grow_factor,
+            index_grow_factor: self.index_grow_factor,
             defrag_level: self.defrag_level,
         };
-        arena.expand(self.block_count);
+        arena.grow(self.block_count);
         arena
     }
 }
@@ -86,6 +94,7 @@ pub struct Arena64 {
     index: *mut Index64,
     last: *mut Block64,
     grow_factor: usize,
+    index_grow_factor: usize,
     defrag_level: DefragLevel,
 }
 
@@ -95,6 +104,7 @@ impl Arena64 {
             index: null_mut(),
             last: null_mut(),
             grow_factor: 1,
+            index_grow_factor: 0,
             defrag_level: DefragLevel::L4,
         }
     }
@@ -118,9 +128,14 @@ impl Arena64 {
     //     unsafe{&(*self.index)}.len()
     // }
 
-    pub fn expand(&mut self, block_count: usize) {
+    //#TODO try_grow
+    pub fn grow(&mut self, block_count: usize) {
         if block_count == 0 {
             return;
+        }
+
+        if self.grow_factor == 0 {
+            panic!("can't grow cause grow factor is 0")
         }
 
         if self.index.is_null() {

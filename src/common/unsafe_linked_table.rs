@@ -52,15 +52,14 @@ impl<T> UnsafeLinkedTable<T> {
         }
     }
 
-    pub unsafe fn cursor_front_mut(&mut self, width: usize) -> CursorMut<'_, T> {
-        assert_ne!(width, 0);
-        todo!()
-        // CursorMut {
-        //     list_cursor: self.array.index_mut(0).cursor_front_mut(),
-        //     table: &mut self,
-        //     table_width: width,
-        //     current_list: 0,
-        // }
+    pub unsafe fn cursor_mut(&mut self, column: usize, table_width: usize) -> CursorMut<'_, T> {
+        assert_ne!(table_width, 0);
+        CursorMut {
+            current: unsafe{self.array.index_mut(column)}.head(),
+            table: self,
+            column,
+            table_width,
+        }
     }
 
     pub unsafe fn drop_table(table: &mut UnsafeLinkedTable<T>, width: usize) {
@@ -98,8 +97,10 @@ impl<'a, T> CursorMut<'a, T> {
     }
 
     pub fn remove_current(&mut self) -> Option<T> {
+        let node = self.current;
+        self.move_next();
         unsafe {
-            LinkedList::<Option<T>>::remove_node(self.table.array.index_mut(self.column), self.current).flatten()
+            LinkedList::<Option<T>>::remove_node(self.table.array.index_mut(self.column), node).flatten()
         }
     }
 }

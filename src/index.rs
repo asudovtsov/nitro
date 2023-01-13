@@ -2,9 +2,6 @@ use std::mem;
 use std::alloc::Layout;
 use std::alloc;
 
-use crate::block;
-use crate::common::unsafe_array::UnsafeArray;
-use crate::common::linked_list::LinkedList;
 use crate::block::Block64;
 use crate::common::unsafe_linked_table::UnsafeLinkedTable;
 use crate::mask::Mask64;
@@ -70,17 +67,14 @@ impl Chunk64 {
     }
 }
 
-type CapacityArray = UnsafeArray<Option<Chunk64>>; //#TODO RawArray<StableStack<Chunk>>
 
 const BLOCK_CAPACITY: usize = 64;
 
 pub(crate) struct Index64 { //#TODO do not add field block_capacty, just use external variable (UnsafeIndex)
-    table: UnsafeLinkedTable<Chunk64>,//#TODO RawArray<StableStack<Chunk>>
+    table: UnsafeLinkedTable<Chunk64>, //#TODO RawArray<StableStack<Chunk>>
     mask: Mask64,
     map: Vec<Option<usize>>,
-    empty_chunks: LinkedList<Chunk64>,
     drainable: Option<Chunk64>,
-    // flat_take: Box<dyn FlatCapTake>,
 }
 
 impl Index64 {
@@ -93,7 +87,6 @@ impl Index64 {
                 table: UnsafeLinkedTable::with_capacity(BLOCK_CAPACITY, block_count),
                 mask: Mask64::new(),
                 map: vec![None; block_count],
-                empty_chunks: LinkedList::new(),
                 drainable: None,
             });
             index
@@ -218,24 +211,29 @@ impl Index64 {
         todo!()
     }
 
-    // drainable must be checked
-    fn take_from_table(&mut self, size: usize, align: usize) {
-        // let mut cap_index = BLOCK_CAPACITY - self.mask.trailing_zeros() as _;
-        // while cap_index >= size {
-        //     // let mut cursor = self.table.
-        //     let chunk_opt = unsafe { self.table.index_mut(cap_index as _) };
-        //     if matches!(chunk_opt, Some(chunk) if chunk.is_can_place(size, align)) {
-        //         return mem::take(chunk_opt);
-        //     }
-        //     cap_index -= 1;
-        // }
-    }
-
     fn insert_to_table(&mut self, chunk: Chunk64) -> Result<(), Chunk64> {
         todo!()
     }
 
-    fn push_to_empty_chunks(&mut self, chunk: Chunk64) -> Result<(), Chunk64> {
-        todo!()
+    // drainable must be checked
+    fn take_from_table(&mut self, size: usize, align: usize) -> Option<Chunk64> {
+        let zeros = self.mask.trailing_zeros() as usize;
+        if zeros == BLOCK_CAPACITY {
+            return None;
+        }
+        let cap_index = BLOCK_CAPACITY - zeros;
+        let mut cursor = unsafe { self.table.cursor_mut(cap_index, BLOCK_CAPACITY) };
+        loop {
+            match cursor.current() {
+                Some(chunk) => {
+                    if chunk.is_can_place(size, align) {
+                        break cursor.remove_current()
+                    } else {
+                        cursor.move_next();
+                    }
+                },
+                None => break None
+            }
+        }
     }
 }

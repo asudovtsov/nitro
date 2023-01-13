@@ -144,6 +144,8 @@ impl<'a, T> CursorMut<'a, T> {
     }
 
     pub fn remove_current(&mut self) -> Option<T> {
-        unsafe { LinkedList::<T>::remove_node(&mut self.list, self.current) }
+        let node = self.current;
+        self.move_next();
+        unsafe { LinkedList::<T>::remove_node(&mut self.list, node) }
     }
 }

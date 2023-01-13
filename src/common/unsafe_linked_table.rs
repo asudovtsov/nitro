@@ -1,5 +1,5 @@
 use crate::common::linked_list;
-use crate::common::linked_list::LinkedList;
+use crate::common::linked_list::{LinkedList, Node};
 use crate::common::unsafe_array::UnsafeArray;
 
 pub(crate) struct UnsafeLinkedTable<T> {
@@ -100,7 +100,22 @@ impl<'a, T> CursorMut<'a, T> {
         let node = self.current;
         self.move_next();
         unsafe {
-            LinkedList::<Option<T>>::remove_node(self.table.array.index_mut(self.column), node).flatten()
+            LinkedList::<Option<T>>::remove_node(self.table.array.index_mut(self.column), node)
+                .and_then(|non_null| Node::from_non_null(non_null).into_value())
+        }
+    }
+
+    pub fn remove_current_cp(&mut self) -> Option<T> {
+        let node = self.current;
+        self.move_next();
+        unsafe {
+            LinkedList::<Option<T>>::remove_node(self.table.array.index_mut(self.column), node)
+                .and_then(|non_null| {
+                    let mut option = Node::from_non_null(non_null).into_value();
+                    let value = std::mem::take(&mut option);
+                    self.table.reserve.push_node_front(non_null);
+                    value
+                })
         }
     }
 }

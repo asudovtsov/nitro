@@ -22,8 +22,16 @@ impl<T> Node<T> {
         self.value
     }
 
-    pub fn into_value(self: Box<Self>) -> T {
+    pub fn into_value_from_box(self: Box<Self>) -> T {
         self.value
+    }
+
+    pub fn into_value(self) -> T {
+        self.value
+    }
+
+    pub fn prev(&self) -> OptNode<T> {
+        self.prev
     }
 
     pub fn next(&self) -> OptNode<T> {
@@ -32,6 +40,10 @@ impl<T> Node<T> {
 
     pub fn value(&mut self) -> &mut T {
         &mut self.value
+    }
+
+    pub unsafe fn from_non_null(non_null: NonNull<Self>) -> Self {
+        *Box::from_raw(non_null.as_ptr())
     }
 }
 
@@ -57,9 +69,9 @@ impl<T> LinkedList<T> {
         let option = mem::take(&mut self.head);
         option?;
 
-        let mut node = unsafe{Box::from_raw(option.unwrap().as_ptr())};
+        let mut node = unsafe{Node::from_non_null(option.unwrap())};
         self.head = mem::take(&mut node.next);
-        Some(node.into_value())
+        Some(node.value)
     }
 
     pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
@@ -91,15 +103,15 @@ impl<T> LinkedList<T> {
         }
     }
 
-    pub(crate) unsafe fn remove_node(list: &mut LinkedList<T>, node: OptNode<T>) -> Option<T> {
-        let node_mut = unsafe { node?.as_mut() };
-        let prev = node_mut.prev;
-        let next = node_mut.next;
+    pub(crate) unsafe fn remove_node(list: &mut LinkedList<T>, node: OptNode<T>) -> OptNode<T> {
+        let mut node_non_null = node?;
+        let prev = node_non_null.as_mut().prev;
+        let next = node_non_null.as_mut().next;
         match prev {
-            Some(mut non_null) => unsafe { non_null.as_mut().next = next; },
+            Some(mut non_null) => non_null.as_mut().next = next,
             None => { list.head = next; }
         }
-        unsafe { Some(Box::from_raw(node_mut).into_value()) }
+        Some(node_non_null)
     }
 
     pub(crate) fn head(&self) -> OptNode<T> {
@@ -146,6 +158,9 @@ impl<'a, T> CursorMut<'a, T> {
     pub fn remove_current(&mut self) -> Option<T> {
         let node = self.current;
         self.move_next();
-        unsafe { LinkedList::<T>::remove_node(&mut self.list, node) }
+        unsafe {
+            LinkedList::<T>::remove_node(self.list, node)
+                .map(|non_null| Node::from_non_null(non_null).into_value())
+        }
     }
 }

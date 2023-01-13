@@ -103,29 +103,27 @@ impl Index64 {
         }
     }
 
-    pub fn add_chunk(&mut self, mut chunk: Chunk64) {
+    pub fn add_chunk(&mut self, chunk: Chunk64) {
         assert_ne!(chunk.capacity, 0);
         assert!(chunk.capacity <= BLOCK_CAPACITY as _);
 
-        match self.drainable {
-            Some(ref mut drain) => {
-                if drain.try_consume_next(&mut chunk)
-                    || drain.try_consume_prev(&mut chunk) {
+        match std::mem::take(&mut self.drainable) {
+            Some(drainable) => {
+                if drainable.is_block_neighbour(&chunk) {
+                    self.drainable = Some(if chunk.capacity > drainable.capacity {chunk} else {drainable});
                     return;
                 }
 
-                if drain.capacity < chunk.capacity {
-                    // if self.table.index(drain.capacity).is_none() {
-
-                    // }
-                    //#TODO
-                    // push drain to table free cell
-                    // drain = chunk
+                if chunk.capacity() > drainable.capacity() {
+                    self.drainable = Some(chunk);
+                    self.insert_to_table_uninvariant(drainable);
+                } else {
+                    self.drainable = Some(drainable);
+                    self.insert_to_table_uninvariant(chunk);
                 }
             },
             None => {
                 mem::swap(&mut self.drainable, &mut Some(chunk));
-                return;
             },
         }
 
@@ -190,7 +188,7 @@ impl Index64 {
                     return Some(table_chunk);
                 }
 
-                std::mem::replace(&mut self.drainable, Some(chunk))
+                std::mem::replace(&mut self.drainable, Some(chunk)) // return None
             }
             None => self.take_from_table_uninvariant(size, align)
         }

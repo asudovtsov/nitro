@@ -179,24 +179,21 @@ impl Index64 {
     }
 
     pub fn take_chunk_for(&mut self, size: usize, align: usize) -> Option<Chunk64> {
-        todo!()
-        // // try take chunk from drainable
-        // if matches!(self.drainable, Some(ref mut chunk) if chunk.is_can_place(size, align)) {
-        //     return mem::take(&mut self.drainable)
-        // }
+        match mem::take(&mut self.drainable) {
+            Some(chunk) => {
+                if chunk.is_can_place(size, align) {
+                    return mem::take(&mut self.drainable);
+                }
 
-        // // try take chunk from table
-        // let mut cap_index = 63 - self.mask.trailing_zeros();
-        // while (cap_index as usize) >= size {
-        //     let chunk_opt = unsafe { self.table.index_mut(cap_index as _) };
-        //     if matches!(chunk_opt, Some(chunk) if chunk.is_can_place(size, align)) {
-        //         return mem::take(chunk_opt);
-        //     }
-        //     cap_index -= 1;
-        // }
+                if let Some(table_chunk) = self.take_from_table_uninvariant(size, align) {
+                    self.insert_to_table_uninvariant(chunk);
+                    return Some(table_chunk);
+                }
 
-        // // try take chunk from empty list
-        // self.empty_chunks.pop_front()
+                std::mem::replace(&mut self.drainable, Some(chunk))
+            }
+            None => self.take_from_table_uninvariant(size, align)
+        }
     }
 
     fn map_to_table(&mut self, block_index: usize) -> Option<usize> {
@@ -211,23 +208,32 @@ impl Index64 {
         todo!()
     }
 
-    fn insert_to_table(&mut self, chunk: Chunk64) -> Result<(), Chunk64> {
-        todo!()
+    // insert in to table and update mask without caring about drainable
+    fn insert_to_table_uninvariant(&mut self, chunk: Chunk64) {
+        self.mask.set(chunk.capacity());
+        unsafe { self.table.push_front(chunk.capacity() as _, chunk); }
     }
 
-    // drainable must be checked
-    fn take_from_table(&mut self, size: usize, align: usize) -> Option<Chunk64> {
+    // take from table and update mask without caring about drainable
+    fn take_from_table_uninvariant(&mut self, size: usize, align: usize) -> Option<Chunk64> {
         let zeros = self.mask.trailing_zeros() as usize;
+        assert!(zeros <= BLOCK_CAPACITY);
+
         if zeros == BLOCK_CAPACITY {
             return None;
         }
+
         let cap_index = BLOCK_CAPACITY - zeros;
         let mut cursor = unsafe { self.table.cursor_mut(cap_index, BLOCK_CAPACITY) };
         loop {
             match cursor.current() {
                 Some(chunk) => {
                     if chunk.is_can_place(size, align) {
-                        break cursor.remove_current()
+                        let chunk = cursor.remove_current();
+                        if cursor.current().is_none() {
+                            self.mask.reset(cap_index as _);
+                        }
+                        break chunk
                     } else {
                         cursor.move_next();
                     }

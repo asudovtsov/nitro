@@ -1,15 +1,16 @@
-use std::mem;
-use std::ptr::null_mut;
+use std::mem::{self, MaybeUninit};
 use std::alloc::Layout;
 use std::alloc;
 
+use crate::common::linked_list::UnsafePicker;
 use crate::index::{Index64, Chunk64};
 use crate::mask::Mask64;
 
-pub(crate) struct Block64{
+pub(crate) struct Block64 {
     block_index: usize,
     prev: *mut Block64,
     index: *mut Index64,
+    picker: Option<UnsafePicker<MaybeUninit<Chunk64>>>,
     mask: Mask64,
 }
 
@@ -42,7 +43,7 @@ impl Block64 {
         unsafe {
             let block: *mut Block64 = alloc::alloc(layout).cast();
             assert_eq!(block.align_offset(mem::align_of::<Block64>()), 0);
-            block.write(Block64 {block_index, prev, index, mask: Mask64::new()});
+            block.write(Block64 {block_index, prev, index, picker: None, mask: Mask64::new()});
             (block, Chunk64::new(block, block.add(1).cast(), capacity as _))
         }
     }

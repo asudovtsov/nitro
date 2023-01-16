@@ -138,15 +138,15 @@ impl Arena64 {
             panic!("can't grow cause grow factor is 0")
         }
 
-        if self.index.is_null() {
-            self.index = Index64::alloc_index(block_count);
-        }
+        // if self.index.is_null() {
+        //     self.index = Index64::alloc_index(block_count);
+        // }
 
-        for i in 0..block_count {
-            let (block, chunk) = Block64::alloc_block(i, self.last, self.index);
-            unsafe { (*self.index).add_chunk(chunk); }
-            self.last = block;
-        }
+        // for i in 0..block_count {
+        //     let (block, chunk) = Block64::alloc_block(i, self.last, self.index);
+        //     unsafe { (*self.index).add_chunk(chunk); }
+        //     self.last = block;
+        // }
 
         //#TODO expand index.block_to_capacity
     }

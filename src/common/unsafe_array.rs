@@ -7,7 +7,7 @@ pub(crate) struct UnsafeArray<T> {
 }
 
 impl<T> UnsafeArray<T> {
-    pub fn new_with<F>(size: usize, f: F) -> Self
+    pub fn new<F>(size: usize, f: F) -> Self
         where F: Fn() -> T
     {
         let Ok(layout) = Layout::array::<T>(size) else {

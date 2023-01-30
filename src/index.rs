@@ -1,5 +1,6 @@
 use std::mem::MaybeUninit;
 use std::mem;
+use std::ops::Index;
 use std::ptr::NonNull;
 use std::alloc::Layout;
 use std::alloc;
@@ -7,7 +8,7 @@ use std::alloc;
 use crate::block::Block64;
 use crate::common::linked_list::{LinkedList, Node, OptNode};
 use crate::common::unsafe_table::UnsafeTable;
-use crate::mask::Mask64;
+use crate::mask::{Mask, Mask64};
 
 pub(crate) struct Chunk64 {
     block: *mut Block64,
@@ -28,56 +29,82 @@ impl Chunk64 {
         self.capacity
     }
 
-    pub fn block_index(&self) -> usize {
-        unsafe {&*self.block}.block_index()
-    }
+    // pub fn try_consume_next(&mut self, other: &mut Chunk64) -> bool {
+    //     if self.is_next_neighbour(&other) {
+    //         self.capacity += other.capacity;
+    //         other.capacity = 0;
+    //         return true
+    //     }
+    //     false
+    // }
 
-    pub fn try_consume_next(&mut self, other: &mut Chunk64) -> bool {
-        if self.is_next_neighbour(&other) {
-            self.capacity += other.capacity;
-            other.capacity = 0;
-            return true
-        }
-        false
-    }
+    // pub fn try_consume_prev(&mut self, other: &mut Chunk64) -> bool {
+    //     if other.is_next_neighbour(&self) {
+    //         self.addr = other.addr;
+    //         self.capacity += other.capacity;
+    //         other.capacity = 0;
+    //         return true
+    //     }
+    //     false
+    // }
 
-    pub fn try_consume_prev(&mut self, other: &mut Chunk64) -> bool {
-        if other.is_next_neighbour(&self) {
-            self.addr = other.addr;
-            self.capacity += other.capacity;
-            other.capacity = 0;
-            return true
-        }
-        false
-    }
+    // pub fn is_next_neighbour(&self, other: &Chunk64) -> bool {
+    //     if self.addr.is_null() || other.addr.is_null() {
+    //         return false;
+    //     }
+    //     unsafe { self.addr.add(self.capacity as _) == other.addr }
+    // }
 
-    pub fn is_next_neighbour(&self, other: &Chunk64) -> bool {
-        if self.addr.is_null() || other.addr.is_null() {
-            return false;
-        }
-        unsafe { self.addr.add(self.capacity as _) == other.addr }
-    }
+    // pub fn is_block_neighbour(&self, other: &Chunk64) -> bool {
+    //     self.block == other.block
+    // }
 
-    pub fn is_block_neighbour(&self, other: &Chunk64) -> bool {
-        self.block == other.block
-    }
-
-    pub fn is_can_place(&self, size: usize, align: usize) -> bool {
+    pub fn place_result(&self, size: usize, align: usize) -> Result<(Option<Self>, Option<Self>), ()> {
         let end = unsafe { self.addr.add(self.capacity as _) };
         let type_offset = self.addr.align_offset(align);
         let type_end = unsafe { self.addr.add(type_offset + size) };
-        type_end <= end
+        if type_end > end {
+            return Err(());
+        }
+
+        let first = if type_offset != 0 {
+            Some(Chunk64 {
+                block: self.block,
+                addr: self.addr,
+                capacity: type_offset as _
+            })
+        } else {
+            None
+        };
+
+        let second = if type_end != end {
+            Some(Chunk64 {
+                block: self.block,
+                addr: unsafe {self.addr.add(type_offset)},
+                capacity: self.capacity - size as u8 - type_offset as u8
+            })
+        } else {
+            None
+        };
+
+        Ok((first, second))
     }
+
+    // pub fn is_can_place(&self, size: usize, align: usize) -> bool {
+    //     let end = unsafe { self.addr.add(self.capacity as _) };
+    //     let type_offset = self.addr.align_offset(align);
+    //     let type_end = unsafe { self.addr.add(type_offset + size) };
+    //     type_end <= end
+    // }
 }
 
-
-const BLOCK_CAPACITY: usize = 64;
+const BLOCK64_CAPACITY: usize = 64;
 
 type MaybeChunk64 = MaybeUninit<Chunk64>;
 
 pub(crate) struct Index64 { //#TODO do not add field block_capacty, just use external variable (UnsafeIndex)
     table: UnsafeTable<MaybeChunk64>,
-    drain: LinkedList<MaybeChunk64>,
+    // drain: LinkedList<MaybeChunk64>,
     reserve: LinkedList<MaybeChunk64>,
     mask: Mask64,
 }
@@ -94,10 +121,10 @@ impl Index64 {
             let index: *mut Index64 = alloc::alloc(layout).cast();
             assert_eq!(index.align_offset(mem::align_of::<Index64>()), 0);
             index.write(Index64{
-                table: UnsafeTable::new(BLOCK_CAPACITY),
-                drain: LinkedList::new(),
+                table: UnsafeTable::new(BLOCK64_CAPACITY),
+                // drain: LinkedList::new(),
                 reserve,
-                mask: Mask64::new(),
+                mask: <Mask64 as Mask>::new(),
             });
             index
         }
@@ -107,7 +134,7 @@ impl Index64 {
         assert!(!index.is_null());
         let layout = Layout::new::<Index64>();
         unsafe {
-            UnsafeTable::<MaybeChunk64>::drop_table(&mut (*index).table, BLOCK_CAPACITY);
+            UnsafeTable::<MaybeChunk64>::drop_table(&mut (*index).table, BLOCK64_CAPACITY);
             index.drop_in_place();
             alloc::dealloc(index.cast(), layout);
         }
@@ -201,40 +228,40 @@ impl Index64 {
         todo!()
     }
 
-    pub unsafe fn push_to_drain(&mut self, nn: NonNull<Node<MaybeChunk64>>) {
-        if self.drain.is_empty() {
-            self.drain.push_node_front(nn);
-            return;
-        }
+    // pub unsafe fn push_to_drain(&mut self, nn: NonNull<Node<MaybeChunk64>>) {
+    //     if self.drain.is_empty() {
+    //         self.drain.push_node_front(nn);
+    //         return;
+    //     }
 
-        let mut count = 0;
-        let mut cursor = self.drain.cursor_front_mut();
-        let mut opt_nn = Some(nn);
-        let mut prev;
+    //     let mut count = 0;
+    //     let mut cursor = self.drain.cursor_front_mut();
+    //     let mut opt_nn = Some(nn);
+    //     let mut prev;
 
-        loop {
-            //#CONTINUE
-            match cursor.current_node() {
-                Some(current) => {
-                    let capacity = nn.as_ref().value_ref().assume_init_ref().capacity();
-                    let current_capacity = current.assume_init_ref().capacity();
-                    if current_capacity < capacity {
-                        opt_nn = cursor.replace_current_node(std::mem::take(&mut opt_nn).unwrap())
-                    }
-                    prev = current;
-                },
-                None => {
-                    if count < 2 {
-                        //#TOTO list.push_node_after(prev, opt_nn.unwrap())
-                    } else {
-                        //#TOTO list.push_node_after(prev, opt_nn.unwrap())
-                        //#TODO return old_node to table
-                    }
-                },
-            }
+    //     loop {
+    //         //#CONTINUE
+    //         match cursor.current_node() {
+    //             Some(current) => {
+    //                 let capacity = nn.as_ref().value_ref().assume_init_ref().capacity();
+    //                 let current_capacity = current.assume_init_ref().capacity();
+    //                 if current_capacity < capacity {
+    //                     opt_nn = cursor.replace_current_node(std::mem::take(&mut opt_nn).unwrap())
+    //                 }
+    //                 prev = current;
+    //             },
+    //             None => {
+    //                 if count < 2 {
+    //                     //#TOTO list.push_node_after(prev, opt_nn.unwrap())
+    //                 } else {
+    //                     //#TOTO list.push_node_after(prev, opt_nn.unwrap())
+    //                     //#TODO return old_node to table
+    //                 }
+    //             },
+    //         }
 
-            cursor.move_next();
-            count += 1;
-        }
-    }
+    //         cursor.move_next();
+    //         count += 1;
+    //     }
+    // }
 }

@@ -132,6 +132,10 @@ impl<T> LinkedList<T> {
         }
         Some(node_nn)
     }
+
+    pub fn leak(self) {
+        self.head = None;
+    }
 }
 
 impl<T> Drop for LinkedList<T> {

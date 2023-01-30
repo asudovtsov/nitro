@@ -1,6 +1,7 @@
 use std::alloc::Layout;
 use std::alloc;
 use std::mem;
+use std::ptr;
 
 pub(crate) struct UnsafeArray<T> {
     data: *mut T
@@ -35,12 +36,12 @@ impl<T> UnsafeArray<T> {
         }
     }
 
-    pub unsafe fn drop_array(array: &mut UnsafeArray<T>, size: usize) {
-        let Ok(layout) = Layout::array::<T>(size) else {
+    pub unsafe fn drop_array(array: &mut UnsafeArray<T>, len: usize, capacity: usize) {
+        let Ok(layout) = Layout::array::<T>(capacity) else {
             todo!()
         };
 
-        array.data.drop_in_place();
+        ptr::drop_in_place(ptr::slice_from_raw_parts_mut(array.data, len));
         alloc::dealloc(array.data.cast(), layout);
     }
 

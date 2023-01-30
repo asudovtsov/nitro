@@ -1,26 +1,18 @@
-use std::mem::{self, MaybeUninit};
 use std::alloc::Layout;
 use std::alloc;
+use std::mem;
 
-use crate::common::linked_list::UnsafePicker;
 use crate::index::{Index64, Chunk64};
-use crate::mask::Mask64;
 
 pub(crate) struct Block64 {
-    block_index: usize,
     prev: *mut Block64,
     index: *mut Index64,
-    picker: Option<UnsafePicker<MaybeUninit<Chunk64>>>,
-    mask: Mask64,
+    counter: usize,
 }
 
 impl Block64 {
     pub fn prev(&self) -> *mut Block64 {
         self.prev
-    }
-
-    pub fn block_index(&self) -> usize {
-        self.block_index
     }
 
     // pub fn has_index(&self) -> bool {
@@ -32,7 +24,7 @@ impl Block64 {
     //     self.index = null_mut();
     // }
 
-    pub fn alloc_block(block_index: usize, prev: *mut Block64, index: *mut Index64) -> (*mut Block64, Chunk64) {
+    pub fn alloc_block(prev: *mut Block64, index: *mut Index64) -> (*mut Block64, Chunk64) {
         let capacity = 64;
         assert!(!index.is_null());
         assert!(capacity != 0);
@@ -43,14 +35,13 @@ impl Block64 {
         unsafe {
             let block: *mut Block64 = alloc::alloc(layout).cast();
             assert_eq!(block.align_offset(mem::align_of::<Block64>()), 0);
-            block.write(Block64 {block_index, prev, index, picker: None, mask: Mask64::new()});
+            block.write(Block64 {prev, index, counter: 0});
             (block, Chunk64::new(block, block.add(1).cast(), capacity as _))
         }
     }
 
     pub fn drop_block(block: *mut Block64) {
         assert!(!block.is_null());
-        assert!(unsafe{&(*block)}.mask.trailing_zeros() == 64);
         let capacity = 64;
         let Ok(layout) = Layout::array::<u8>(mem::size_of::<Block64>() + capacity) else {
             todo!()

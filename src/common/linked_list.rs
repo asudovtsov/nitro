@@ -165,6 +165,10 @@ impl<'a, T> CursorMut<'a, T> {
         None
     }
 
+    pub fn current_node(&self) -> OptNode<T> {
+        self.current
+    }
+
     pub fn move_next(&mut self) {
         match self.current.take() {
             Some(current) => unsafe {

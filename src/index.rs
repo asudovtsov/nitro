@@ -201,44 +201,40 @@ impl Index64 {
         todo!()
     }
 
-    pub unsafe fn push_via_drain(&mut self, nn: NonNull<Node<MaybeChunk64>>) {
+    pub unsafe fn push_to_drain(&mut self, nn: NonNull<Node<MaybeChunk64>>) {
         if self.drain.is_empty() {
             self.drain.push_node_front(nn);
             return;
         }
 
-        let mut index = 0;
+        let mut count = 0;
         let mut cursor = self.drain.cursor_front_mut();
         let mut opt_nn = Some(nn);
-        while let Some(mu) = cursor.current() {
-            let capacity = nn.as_ref().value_ref().assume_init_ref().capacity();
-            if mu.assume_init_mut().capacity() < capacity {
-                opt_nn = cursor.replace_current_node(std::mem::take(&mut opt_nn).unwrap())
+        let mut prev;
+
+        loop {
+            //#CONTINUE
+            match cursor.current_node() {
+                Some(current) => {
+                    let capacity = nn.as_ref().value_ref().assume_init_ref().capacity();
+                    let current_capacity = current.assume_init_ref().capacity();
+                    if current_capacity < capacity {
+                        opt_nn = cursor.replace_current_node(std::mem::take(&mut opt_nn).unwrap())
+                    }
+                    prev = current;
+                },
+                None => {
+                    if count < 2 {
+                        //#TOTO list.push_node_after(prev, opt_nn.unwrap())
+                    } else {
+                        //#TOTO list.push_node_after(prev, opt_nn.unwrap())
+                        //#TODO return old_node to table
+                    }
+                },
             }
 
             cursor.move_next();
-            index += 1;
-
-            if index == 2 {
-                break;
-            }
+            count += 1;
         }
-        // match self.drain.head() {
-        //     Some(head_nn) => {
-        //         match head_nn.as_mut().next() {
-        //             Some(next_nn) => {},
-        //             None => {
-        //                 let capacity = nn.as_mut().value().assume_init().capacity();
-        //                 let h_capacity = head_nn.as_mut().value().assume_init().capacity();
-        //                 if capacity > h_capacity {
-        //                     self.drain.push_node_front(nn);
-        //                 } else {
-
-        //                 }
-        //             },
-        //         }
-        //     },
-        //     None => self.drain.push_node_front(nn),
-        // }
     }
 }

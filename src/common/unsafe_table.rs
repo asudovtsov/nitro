@@ -92,43 +92,6 @@ impl<'a, T> CursorMut<'a, T> {
     }
 }
 
-
-
-
-// pub(crate) struct CursorMut<'a, T> {
-//     list_cursor: linked_list::CursorMut<'a, Option<T>>,
-//     table: &'a mut UnsafeLinkedTable<T>,
-//     table_width: usize,
-//     current_list: usize,
-// }
-
-// impl<'a, T> CursorMut<'a, T> {
-//     pub fn current(&mut self) -> Option<&mut T> {
-//         match self.list_cursor.current() {
-//             Some(opt) => opt.as_mut(),
-//             None => None
-//         }
-//     }
-
-//     pub fn move_next(&'a mut self) {
-//         self.list_cursor.move_next();
-//         if self.list_cursor.current().is_none() && self.current_list < (self.table_width - 1) {
-//             self.current_list += 1;
-//             let mut next_list = unsafe{self.table.array.index_mut(self.current_list)};
-//             self.list_cursor = next_list.cursor_front_mut();
-//         }
-//     }
-
-//     pub fn remove_current(&mut self) -> Option<T> {
-//         self.list_cursor.remove_current()?
-//         // match self.list_cursor.remove_current() {
-//         //     Some(opt) => opt,
-//         //     None => None
-//         // }
-//     }
-// }
-
-
 #[cfg(test)]
 mod tests {
     #[test]

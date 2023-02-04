@@ -6,7 +6,7 @@ use std::alloc::Layout;
 use std::alloc;
 
 use crate::block::Block64;
-use crate::common::linked_list::{LinkedList, Node, OptNode};
+use crate::common::linked_list::{List, Node, OptNode};
 use crate::common::unsafe_table::UnsafeTable;
 use crate::mask::{Mask, Mask64};
 
@@ -105,30 +105,30 @@ type MaybeChunk64 = MaybeUninit<Chunk64>;
 pub(crate) struct Index64 { //#TODO do not add field block_capacty, just use external variable (UnsafeIndex)
     table: UnsafeTable<MaybeChunk64>,
     // drain: LinkedList<MaybeChunk64>,
-    reserve: LinkedList<MaybeChunk64>,
+    reserve: List<MaybeChunk64>,
     mask: Mask64,
 }
 
 impl Index64 {
-    pub fn alloc_index(reserve_capacity: usize) -> *mut Index64 {
-        let mut reserve = LinkedList::new();
-        for _ in 0..reserve_capacity {
-            reserve.push_front(MaybeUninit::uninit());
-        }
+    // pub fn alloc_index(reserve_capacity: usize) -> *mut Index64 {
+    //     let mut reserve = LinkedList::new();
+    //     for _ in 0..reserve_capacity {
+    //         reserve.push_front(MaybeUninit::uninit());
+    //     }
 
-        let layout = Layout::new::<Index64>();
-        unsafe {
-            let index: *mut Index64 = alloc::alloc(layout).cast();
-            assert_eq!(index.align_offset(mem::align_of::<Index64>()), 0);
-            index.write(Index64{
-                table: UnsafeTable::new(BLOCK64_CAPACITY),
-                // drain: LinkedList::new(),
-                reserve,
-                mask: <Mask64 as Mask>::new(),
-            });
-            index
-        }
-    }
+    //     let layout = Layout::new::<Index64>();
+    //     unsafe {
+    //         let index: *mut Index64 = alloc::alloc(layout).cast();
+    //         assert_eq!(index.align_offset(mem::align_of::<Index64>()), 0);
+    //         index.write(Index64{
+    //             table: UnsafeTable::new(BLOCK64_CAPACITY),
+    //             // drain: LinkedList::new(),
+    //             reserve,
+    //             mask: <Mask64 as Mask>::new(),
+    //         });
+    //         index
+    //     }
+    // }
 
     pub fn drop_index(index: *mut Index64) {
         assert!(!index.is_null());

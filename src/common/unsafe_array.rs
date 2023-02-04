@@ -8,22 +8,22 @@ pub(crate) struct UnsafeArray<T> {
 }
 
 impl<T> UnsafeArray<T> {
-    pub fn new<F>(size: usize, f: F) -> Self
-        where F: Fn() -> T
-    {
-        let Ok(layout) = Layout::array::<T>(size) else {
-            todo!()
-        };
+    // pub fn new_with<F>(size: usize, f: F) -> Self
+    //     where F: Fn() -> T
+    // {
+    //     let Ok(layout) = Layout::array::<T>(size) else {
+    //         todo!()
+    //     };
 
-        unsafe {
-            let data: *mut T = alloc::alloc(layout).cast();
-            for i in 0..size {
-                data.add(i).write(f());
-            }
+    //     unsafe {
+    //         let data: *mut T = alloc::alloc(layout).cast();
+    //         for i in 0..size {
+    //             data.add(i).write(f());
+    //         }
 
-            UnsafeArray { data }
-        }
-    }
+    //         UnsafeArray { data }
+    //     }
+    // }
 
     pub fn uninit(size: usize) -> Self {
         let Ok(layout) = Layout::array::<T>(size) else {
@@ -59,5 +59,26 @@ impl<T> UnsafeArray<T> {
 
     pub unsafe fn replace(&mut self, index: usize, value: T) -> T {
         mem::replace(&mut *self.data.add(index).cast(), value)
+    }
+}
+
+impl<T> UnsafeArray<T> {
+    pub(crate) fn new_with<F, K>(size: usize, f: F, mut k: K) -> Self
+        where F: Fn() -> T, K: FnMut(&mut T)
+    {
+        let Ok(layout) = Layout::array::<T>(size) else {
+            todo!()
+        };
+
+        unsafe {
+            let data: *mut T = alloc::alloc(layout).cast();
+            for i in 0..size {
+                let ptr = data.add(i);
+                ptr.write(f());
+                k(&mut *ptr);
+            }
+
+            UnsafeArray { data }
+        }
     }
 }

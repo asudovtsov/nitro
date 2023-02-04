@@ -1,16 +1,16 @@
-use std::ptr::{NonNull, addr_of_mut};
+use std::ptr::{NonNull, addr_of_mut, null_mut};
 use std::mem;
 
 pub(crate) type OptNode<T> = Option<NonNull<Node<T>>>;
 
 pub(crate) struct Node<T> {
-    prev: OptNode<T>,
-    next: OptNode<T>,
+    prev: *mut Node<T>,
+    next: *mut Node<T>,
     value: T,
 }
 
 impl<T> Node<T> {
-    pub fn new(prev: OptNode<T>, next: OptNode<T>, value: T) -> Self {
+    pub fn new(prev: *mut Node<T>, next: *mut Node<T>, value: T) -> Self {
         Node {
             prev,
             next,
@@ -30,11 +30,11 @@ impl<T> Node<T> {
         self.value
     }
 
-    pub fn prev(&self) -> OptNode<T> {
+    pub fn prev(&self) -> *mut Node<T> {
         self.prev
     }
 
-    pub fn next(&self) -> OptNode<T> {
+    pub fn next(&self) -> *mut Node<T> {
         self.next
     }
 
@@ -52,169 +52,161 @@ impl<T> Node<T> {
 }
 
 #[derive(Clone)]
-pub(crate) struct LinkedList<T> {
-    head: OptNode<T>
+pub(crate) struct List<T> {
+    head: *mut Node<T>
 }
 
-impl<T> LinkedList<T> {
+impl<T> List<T> {
     pub fn new() -> Self {
-        LinkedList {
-            head: None
+        List {
+            head: null_mut()
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.head.is_none()
+        self.head.is_null()
     }
 
-    pub fn head(&self) -> OptNode<T> {
-        self.head
-    }
+    // pub fn head(&self) -> *mut Node<T> {
+    //     self.head
+    // }
 
-    pub fn push_front(&mut self, value: T) {
-        let next = mem::take(&mut self.head);
-        let ptr = Box::leak(Box::new(Node::new(None, next, value)));
-        self.head = Some(unsafe {NonNull::new_unchecked(ptr)});
-    }
+    pub fn push_node_front(&mut self, mut node: *mut Node<T>) {
+        assert!(!node.is_null());
 
-    pub fn pop_front(&mut self) -> Option<T> {
-        let option = mem::take(&mut self.head);
-        option?;
+        let mut old_head = self.head;
+        self.head = node;
 
-        let mut node = unsafe{Node::from_non_null(option.unwrap())};
-        self.head = mem::take(&mut node.next);
-        Some(node.value)
-    }
-
-    pub fn push_node_front(&mut self, mut node: NonNull<Node<T>>) {
-        unsafe {
-            assert!(node.as_mut().prev.is_none());
-            node.as_mut().next = match self.head {
-                Some(mut nn) => {
-                    nn.as_mut().prev = Some(node);
-                    Some(nn)
-                }
-                None=> None,
+        if !old_head.is_null() {
+            unsafe {
+                (*old_head).prev = node;
+                (*node).next = old_head;
             }
         }
-        self.head = Some(node);
     }
 
-    pub fn pop_node_front(&mut self) -> OptNode<T> {
-        let option = mem::take(&mut self.head);
-        match option {
-            Some(mut nn) => {
-                self.head = mem::take(&mut unsafe{nn.as_mut().next});
-                Some(nn)
-            },
-            None => None
+    pub fn pop_node_front(&mut self) -> *mut Node<T> {
+        let mut old_head = self.head;
+        if old_head.is_null() {
+            return null_mut();
         }
+
+        unsafe {
+            (*old_head).prev = null_mut();
+            self.head = (*old_head).next;
+        }
+
+        old_head
     }
 
     pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T> {
         CursorMut { current: self.head, list: self }
     }
 
-    pub fn unsafe_picker(&mut self, node: OptNode<T>) -> UnsafePicker<T> {
-        UnsafePicker {
-            node: node,
-            list: unsafe {NonNull::new_unchecked(addr_of_mut!(*self))}
+    // pub fn unsafe_picker(&mut self, node: OptNode<T>) -> UnsafePicker<T> {
+    //     UnsafePicker {
+    //         node: node,
+    //         list: unsafe {NonNull::new_unchecked(addr_of_mut!(*self))}
+    //     }
+    // }
+
+    pub unsafe fn take_node_from(list: &mut List<T>, node: *mut Node<T>) {
+        assert!(!node.is_null());
+
+        let prev = unsafe{&*node}.prev;
+        let next = unsafe{&*node}.next;
+
+        if prev.is_null() {
+            list.head = next;
+        } else {
+            unsafe{&mut *prev}.next = next;
         }
     }
 
-    pub unsafe fn take_node_from(list: &mut LinkedList<T>, node: OptNode<T>) -> OptNode<T> {
-        let mut node_nn = node?;
-        let prev = node_nn.as_mut().prev;
-        let next = node_nn.as_mut().next;
-        match prev {
-            Some(mut nn) => nn.as_mut().next = next,
-            None => { list.head = next; }
-        }
-        Some(node_nn)
-    }
-
-    pub fn leak(self) {
-        self.head = None;
-    }
+    // pub fn leak(self) {
+    //     self.head = None;
+    // }
 }
 
-impl<T> Drop for LinkedList<T> {
+impl<T> Drop for List<T> {
     fn drop(&mut self) {
-        let mut opt_node = self.head;
-        while let Some(mut nn) = opt_node {
-            unsafe {
-                Node::from_non_null(nn);
-                opt_node = nn.as_mut().next;
-            };
-        }
+        todo!()
+        // let mut opt_node = self.head;
+        // while let Some(mut nn) = opt_node {
+        //     unsafe {
+        //         Node::from_non_null(nn);
+        //         opt_node = nn.as_mut().next;
+        //     };
+        // }
     }
 }
 
-impl<T> Default for LinkedList<T> {
-    fn default() -> Self {
-        LinkedList::new()
-    }
-}
+// impl<T> Default for LinkedList<T> {
+//     fn default() -> Self {
+//         LinkedList::new()
+//     }
+// }
 
 pub(crate) struct CursorMut<'a, T> {
-    current: OptNode<T>,
-    list: &'a mut LinkedList<T>,
+    current: *mut Node<T>,
+    list: &'a mut List<T>,
 }
 
 impl<'a, T> CursorMut<'a, T> {
     pub fn current(&mut self) -> Option<&mut T> {
-        if let Some(nn) = self.current.as_mut() {
-            return Some(unsafe{nn.as_mut().value_mut()})
+        if !self.current.is_null() {
+            return Some(&mut unsafe{&mut *self.current}.value)
         }
         None
     }
 
-    pub fn current_node(&self) -> OptNode<T> {
+    pub fn current_node(&self) -> *mut Node<T> {
         self.current
     }
 
-    pub fn move_next(&mut self) {
-        match self.current.take() {
-            Some(current) => unsafe {
-                self.current = current.as_ref().next;
-            },
-            None => {
-                self.current = None;
-            }
+    pub fn move_next(&mut self) -> bool {
+        if !self.current.is_null() {
+            self.current = unsafe{&*self.current}.next;
+            return true
         }
+        false
     }
 
     pub fn remove_current(&mut self) -> Option<T> {
         let node = self.current;
+        if node.is_null() {
+            return None;
+        }
+
         self.move_next();
         unsafe {
-            LinkedList::<T>::take_node_from(self.list, node)
-                .map(|nn| Node::from_non_null(nn).into_value())
+            List::<T>::take_node_from(self.list, node);
+            Some(Box::from_raw(node).into_value_from_box())
         }
     }
 
-    pub fn replace_current_node(&mut self, nn: NonNull<Node<T>>) -> OptNode<T> {
-        debug_assert!(self.current.is_some());
-        todo!()
-    }
+    // pub fn replace_current_node(&mut self, nn: NonNull<Node<T>>) -> OptNode<T> {
+    //     debug_assert!(!self.current.is_null());
+    //     todo!()
+    // }
 }
 
-pub(crate) struct UnsafePicker<T> {
-    node: OptNode<T>,
-    list: NonNull<LinkedList<T>>,
-}
+// pub(crate) struct UnsafePicker<T> {
+//     node: OptNode<T>,
+//     list: NonNull<LinkedList<T>>,
+// }
 
-impl<'a, T> UnsafePicker<T> {
-    pub unsafe fn pick(&mut self) -> T {
-        let nn = LinkedList::<T>::take_node_from(self.list.as_mut(), self.node).unwrap_unchecked();
-        Node::from_non_null(nn).into_value()
-    }
+// impl<'a, T> UnsafePicker<T> {
+//     pub unsafe fn pick(&mut self) -> T {
+//         let nn = LinkedList::<T>::take_node_from(self.list.as_mut(), self.node).unwrap_unchecked();
+//         Node::from_non_null(nn).into_value()
+//     }
 
-    pub unsafe fn pick_mut(&mut self) -> &mut T {
-        self.node.as_mut().unwrap_unchecked().as_mut().value_mut()
-    }
+//     pub unsafe fn pick_mut(&mut self) -> &mut T {
+//         self.node.as_mut().unwrap_unchecked().as_mut().value_mut()
+//     }
 
-    pub unsafe fn pick_node(&mut self) -> OptNode<T> {
-        LinkedList::<T>::take_node_from(self.list.as_mut(), self.node)
-    }
-}
+//     pub unsafe fn pick_node(&mut self) -> OptNode<T> {
+//         LinkedList::<T>::take_node_from(self.list.as_mut(), self.node)
+//     }
+// }

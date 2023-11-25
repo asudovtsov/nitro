@@ -2,7 +2,7 @@ use crate::type_erased_deque::{BlockCapacity, TypeErasedDeque};
 use core::any::TypeId;
 use std::collections::HashMap;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Id {
     index: usize,
     type_id: TypeId,
@@ -21,7 +21,7 @@ impl Id {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Tid<T> {
     index: usize,
     phantom: core::marker::PhantomData<T>,

@@ -152,6 +152,10 @@ impl<A: Allocator> TypeErasedDeque<A> {
         &mut *block.cast::<T>().add(inblock_index)
     }
 
+    pub fn contains(&self, index: usize) -> bool {
+        index < self.len && !self.removed.contains(&index)
+    }
+
     pub unsafe fn shrink_to_fit(&mut self, capacity: BlockCapacity) {
         let free_block_count = (self.blocks.len() * capacity.0 - self.len) / capacity.0;
         let block_layout = core::alloc::Layout::from_size_align_unchecked(

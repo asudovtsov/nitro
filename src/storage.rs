@@ -45,6 +45,29 @@ impl<T: 'static> core::fmt::Debug for Tid<T> {
     }
 }
 
+pub trait StorageId {
+    fn index(&self) -> usize;
+    fn type_id(&self) -> TypeId;
+}
+
+impl StorageId for Id {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn type_id(&self) -> TypeId {
+        self.type_id
+    }
+}
+
+impl<T: 'static> StorageId for Tid<T> {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<T>()
+    }
+}
+
 pub struct Storage {
     data: HashMap<TypeId, TypeErasedDeque>,
     capacity: BlockCapacity,
@@ -88,61 +111,32 @@ impl Storage {
         Tid::new(index)
     }
 
-    pub fn remove<T: 'static>(&mut self, id: &Id) -> Option<T> {
-        let type_id = TypeId::of::<T>();
-        if type_id != id.type_id {
-            return None;
+    pub fn remove<T: 'static>(&mut self, id: &impl StorageId) -> Option<T> {
+        let capacity = self.capacity;
+        self.for_deque_mut::<T, _, _>(id.index(), &id.type_id(), None, |deque| unsafe {
+            deque.try_remove(capacity, id.index())
+        })
+    }
+
+    pub fn get<T: 'static>(&self, id: &impl StorageId) -> Option<&T> {
+        let capacity = self.capacity;
+        self.for_deque::<T, _, _>(id.index(), &id.type_id(), None, |deque| unsafe {
+            deque.try_get(capacity, id.index())
+        })
+    }
+
+    pub fn get_mut<T: 'static>(&mut self, id: &impl StorageId) -> Option<&mut T> {
+        let capacity = self.capacity;
+        self.for_deque_mut::<T, _, _>(id.index(), &id.type_id(), None, |deque| unsafe {
+            deque.try_get_mut(capacity, id.index())
+        })
+    }
+
+    pub fn contains(&self, id: &Id) -> bool {
+        match self.data.get(&id.type_id) {
+            Some(deque) => deque.contains(id.index),
+            None => false,
         }
-
-        let capacity = self.capacity;
-        self.for_deque_mut(id.index, &type_id, None, |deque| unsafe {
-            deque.try_remove::<T>(capacity, id.index)
-        })
-    }
-
-    pub fn remove_by_tid<T: 'static>(&mut self, id: &Tid<T>) -> Option<T> {
-        let capacity = self.capacity;
-        self.for_deque_mut(id.index, &TypeId::of::<T>(), None, |deque| unsafe {
-            deque.try_remove::<T>(capacity, id.index)
-        })
-    }
-
-    pub fn get<T: 'static>(&self, id: &Id) -> Option<&T> {
-        let type_id = TypeId::of::<T>();
-        if type_id != id.type_id {
-            return None;
-        }
-
-        let capacity = self.capacity;
-        self.for_deque(id.index, &type_id, None, |deque| unsafe {
-            deque.try_get(capacity, id.index)
-        })
-    }
-
-    pub fn get_by_tid<T: 'static>(&self, id: &Tid<T>) -> Option<&T> {
-        let capacity = self.capacity;
-        self.for_deque(id.index, &TypeId::of::<T>(), None, |deque| unsafe {
-            deque.try_get(capacity, id.index)
-        })
-    }
-
-    pub fn get_mut<T: 'static>(&mut self, id: &Id) -> Option<&mut T> {
-        let type_id = TypeId::of::<T>();
-        if type_id != id.type_id {
-            return None;
-        }
-
-        let capacity = self.capacity;
-        self.for_deque_mut(id.index, &type_id, None, |deque| unsafe {
-            deque.try_get_mut(capacity, id.index)
-        })
-    }
-
-    pub fn get_mut_by_tid<T: 'static>(&mut self, id: &Tid<T>) -> Option<&mut T> {
-        let capacity = self.capacity;
-        self.for_deque_mut(id.index, &TypeId::of::<T>(), None, |deque| unsafe {
-            deque.try_get_mut(capacity, id.index)
-        })
     }
 
     pub fn shrink_to_fit(&mut self) {
@@ -154,11 +148,16 @@ impl Storage {
         self.data.shrink_to_fit();
     }
 
-    fn for_deque<'a, R, F>(&'a self, index: usize, type_id: &TypeId, default: R, f: F) -> R
+    fn for_deque<'a, T, R, F>(&'a self, index: usize, type_id: &TypeId, default: R, f: F) -> R
     where
         F: Fn(&'a TypeErasedDeque) -> R,
         R: 'a,
+        T: 'static,
     {
+        if *type_id != TypeId::of::<T>() {
+            return default;
+        }
+
         match self.data.get(type_id) {
             Some(deque) => {
                 if index >= deque.len() {
@@ -171,11 +170,22 @@ impl Storage {
         }
     }
 
-    fn for_deque_mut<'a, R, F>(&'a mut self, index: usize, type_id: &TypeId, default: R, f: F) -> R
+    fn for_deque_mut<'a, T, R, F>(
+        &'a mut self,
+        index: usize,
+        type_id: &TypeId,
+        default: R,
+        f: F,
+    ) -> R
     where
         F: Fn(&'a mut TypeErasedDeque) -> R,
         R: 'a,
+        T: 'static,
     {
+        if *type_id != TypeId::of::<T>() {
+            return default;
+        }
+
         match self.data.get_mut(type_id) {
             Some(deque) => {
                 if index >= deque.len() {

@@ -27,9 +27,9 @@ impl<T> Tid<T> {
     }
 }
 
-impl<T: 'static> TryFrom<Id> for Tid<T> {
+impl<T: 'static> TryFrom<&Id> for Tid<T> {
     type Error = ();
-    fn try_from(value: Id) -> Result<Self, Self::Error> {
+    fn try_from(value: &Id) -> Result<Self, Self::Error> {
         if value.type_id != TypeId::of::<T>() {
             return Err(());
         }

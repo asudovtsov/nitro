@@ -13,13 +13,13 @@ impl BlockCapacity {
 }
 
 struct Cell<T> {
-    gen: u64,
+    cycle: u64,
     data: T,
 }
 
 impl<T> Cell<T> {
-    fn new(gen: u64, data: T) -> Self {
-        Self { gen, data }
+    fn new(cycle: u64, data: T) -> Self {
+        Self { cycle, data }
     }
 }
 
@@ -98,13 +98,13 @@ impl<A: Allocator> Bucket<A> {
             let block = self.blocks.last().unwrap();
             let pointer = block.cast::<Cell<T>>().add(inblock_index);
 
-            let gen = if index < self.cell_len {
-                (*pointer).gen
+            let cycle = if index < self.cell_len {
+                (*pointer).cycle
             } else {
                 0
             };
 
-            if gen == u64::MAX {
+            if cycle == u64::MAX {
                 self.dead.insert(index);
                 if index == self.len {
                     self.len += 1;
@@ -113,7 +113,7 @@ impl<A: Allocator> Bucket<A> {
                 continue;
             }
 
-            pointer.write(Cell::new(gen + 1, data));
+            pointer.write(Cell::new(cycle + 1, data));
             self.removed.remove(&index);
             if index == self.len {
                 self.len += 1;
@@ -123,7 +123,7 @@ impl<A: Allocator> Bucket<A> {
                 self.cell_len = self.len;
             }
 
-            return (index, gen);
+            return (index, cycle);
         }
     }
 

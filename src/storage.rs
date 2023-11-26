@@ -3,17 +3,17 @@ use core::any::TypeId;
 use std::collections::HashMap;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Index<T> {
+pub struct Id<T> {
     index: usize,
-    gen: u64,
+    cycle: u64,
     phantom: std::marker::PhantomData<T>,
 }
 
-impl<T> Index<T> {
-    fn new(inbucket_index: usize, gen: u64) -> Self {
+impl<T> Id<T> {
+    fn new(inbucket_index: usize, cycle: u64) -> Self {
         Self {
             index: inbucket_index,
-            gen,
+            cycle,
             phantom: Default::default(),
         }
     }
@@ -36,8 +36,8 @@ impl Storage {
         }
     }
 
-    pub fn place<T: 'static>(&mut self, data: T) -> Index<T> {
-        let (index, gen) = unsafe {
+    pub fn place<T: 'static>(&mut self, data: T) -> Id<T> {
+        let (index, cycle) = unsafe {
             self.data
                 .entry(TypeId::of::<T>())
                 .or_insert(Bucket::new::<T>())
@@ -45,10 +45,10 @@ impl Storage {
                 .unwrap()
         };
 
-        Index::new(index, gen)
+        Id::new(index, cycle)
     }
 
-    pub fn remove<T: 'static>(&mut self, id: &Index<T>) -> Option<T> {
+    pub fn remove<T: 'static>(&mut self, id: &Id<T>) -> Option<T> {
         match self.data.get_mut(&TypeId::of::<T>()) {
             Some(bucket) if id.index < bucket.len() => unsafe {
                 bucket.try_remove(self.capacity, id.index)
@@ -57,7 +57,7 @@ impl Storage {
         }
     }
 
-    pub fn get<T: 'static>(&self, id: &Index<T>) -> Option<&T> {
+    pub fn get<T: 'static>(&self, id: &Id<T>) -> Option<&T> {
         match self.data.get(&TypeId::of::<T>()) {
             Some(bucket) if id.index < bucket.len() => unsafe {
                 bucket.try_get(self.capacity, id.index)
@@ -66,7 +66,7 @@ impl Storage {
         }
     }
 
-    pub fn get_mut<T: 'static>(&mut self, id: &Index<T>) -> Option<&mut T> {
+    pub fn get_mut<T: 'static>(&mut self, id: &Id<T>) -> Option<&mut T> {
         match self.data.get_mut(&TypeId::of::<T>()) {
             Some(bucket) if id.index < bucket.len() => unsafe {
                 bucket.try_get_mut(self.capacity, id.index)
@@ -75,7 +75,7 @@ impl Storage {
         }
     }
 
-    pub fn contains<T: 'static>(&self, id: &Index<T>) -> bool {
+    pub fn contains<T: 'static>(&self, id: &Id<T>) -> bool {
         match self.data.get(&TypeId::of::<T>()) {
             Some(bucket) => bucket.contains(id.index),
             None => false,

@@ -116,8 +116,8 @@ impl Storage {
             Ok(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
                     bucket.try_remove(self.capacity, tid.index)
-            },
-            _ => None,
+                },
+                _ => None,
             },
             Err(_) => None,
         }
@@ -128,8 +128,8 @@ impl Storage {
             Ok(tid) => match self.data.get(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
                     bucket.try_get(self.capacity, tid.index)
-            },
-            _ => None,
+                },
+                _ => None,
             },
             Err(_) => None,
         }
@@ -140,8 +140,8 @@ impl Storage {
             Ok(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
                     bucket.try_get_mut(self.capacity, tid.index)
-            },
-            _ => None,
+                },
+                _ => None,
             },
             Err(_) => None,
         }
@@ -151,9 +151,16 @@ impl Storage {
         match id.try_into() {
             Ok(tid) => match self.data.get(&TypeId::of::<T>()) {
                 Some(bucket) => bucket.contains(tid.index),
-            None => false,
+                None => false,
             },
             Err(_) => false,
+        }
+    }
+
+    pub fn contains_id<T: 'static>(&self, id: &Id) -> bool {
+        match self.data.get(&id.type_id) {
+            Some(bucket) => bucket.contains(id.index),
+            None => false,
         }
     }
 
@@ -185,5 +192,64 @@ impl Drop for Storage {
         for (_, bucket) in self.data.iter_mut() {
             unsafe { Bucket::drop(bucket, self.capacity) }
         }
+    }
+}
+
+// #[derive(Debug)]
+// struct A {
+//     string: String,
+// }
+
+// impl Drop for A {
+//     fn drop(&mut self) {
+//         println!("###Drop A {:?}", self);
+//     }
+// }
+
+mod tests {
+    #[test]
+    fn place_remove_contains() {
+        use super::*;
+
+        type Color = (String, u8, u8, u8);
+        // struct Label(String);
+
+        let mut storage = Storage::new();
+        let red = storage.place((String::from("red"), 255, 0, 0));
+        let green = storage.place((String::from("green"), 0, 255, 0));
+
+        for i in 0..10_000_000 {
+            let index = storage.place::<Color>((String::from("red"), 255, 0, 0));
+            // storage.remove(&index);
+            if i % 10_000_000 - 1 == 0 {
+                println!(
+                    "! {} {:?} {} {}",
+                    i,
+                    index,
+                    storage.contains(index),
+                    storage.dead_cells_count::<Color>()
+                );
+            }
+            let id = storage.place_id::<Color>((String::from("red"), 255, 0, 0));
+            storage.contains::<Color>(id);
+        }
+
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf);
+
+        // let blue = storage.place((String::from("blue"), 0, 0, 255));
+        // let label = storage.place(Label("label".into()));
+        // println!("{:?}\n{:?}\n{:?}", red, green, blue);
+        // println!(
+        //     "{:?}\n{:?}\n{:?}",
+        //     storage.contains(&red),
+        //     storage.contains(&green),
+        //     storage.contains(&blue)
+        // );
+
+        // assert!(storage.contains::<Color>(&red));
+        // assert!(storage.contains::<Color>(&green));
+        // assert!(storage.contains::<Color>(&blue));
+        // assert!(storage.contains::<Label>(&label));
     }
 }

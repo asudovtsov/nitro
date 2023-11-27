@@ -1,28 +1,28 @@
-use crate::bucket::{BlockCapacity, Bucket};
+use crate::bucket::{BlockCapacity, Bucket, CellCycle};
 use core::any::TypeId;
 use std::collections::HashMap;
 
-pub trait AsTid<T> {
-    fn as_tid(&self) -> Option<&Tid<T>>;
+pub trait AsTid<T, C: CellCycle> {
+    fn as_tid(&self) -> Option<&Tid<T, C>>;
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-pub struct Tid<T> {
+pub struct Tid<T, C: CellCycle = u32> {
     index: usize,
-    cycle: u64,
+    cycle: C,
     phantom: std::marker::PhantomData<T>,
 }
 
-impl<T> Copy for Tid<T> {}
+impl<T, C: CellCycle> Copy for Tid<T, C> {}
 
-impl<T> Clone for Tid<T> {
+impl<T, C: CellCycle> Clone for Tid<T, C> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Tid<T> {
-    fn new(inbucket_index: usize, cycle: u64) -> Self {
+impl<T, C: CellCycle> Tid<T, C> {
+    fn new(inbucket_index: usize, cycle: C) -> Self {
         Self {
             index: inbucket_index,
             cycle,
@@ -31,20 +31,20 @@ impl<T> Tid<T> {
     }
 }
 
-impl<T> AsTid<T> for &Tid<T> {
-    fn as_tid(&self) -> Option<&Tid<T>> {
+impl<T, C: CellCycle> AsTid<T, C> for &Tid<T, C> {
+    fn as_tid(&self) -> Option<&Tid<T, C>> {
         Some(self)
     }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Id {
-    tid: Tid<()>,
+pub struct Id<C: CellCycle = u32> {
+    tid: Tid<(), C>,
     type_id: TypeId,
 }
 
-impl Id {
-    fn new(inbucket_index: usize, cycle: u64, type_id: TypeId) -> Self {
+impl<C: CellCycle> Id<C> {
+    fn new(inbucket_index: usize, cycle: C, type_id: TypeId) -> Self {
         Self {
             tid: Tid::new(inbucket_index, cycle),
             type_id,
@@ -56,8 +56,8 @@ impl Id {
     }
 }
 
-impl<T: 'static> From<Tid<T>> for Id {
-    fn from(value: Tid<T>) -> Self {
+impl<T: 'static, C: CellCycle> From<Tid<T, C>> for Id<C> {
+    fn from(value: Tid<T, C>) -> Self {
         Self {
             tid: Tid::new(value.index, value.cycle),
             type_id: TypeId::of::<T>(),
@@ -65,8 +65,8 @@ impl<T: 'static> From<Tid<T>> for Id {
     }
 }
 
-impl<T: 'static> AsTid<T> for &Id {
-    fn as_tid(&self) -> Option<&Tid<T>> {
+impl<T: 'static, C: CellCycle> AsTid<T, C> for &Id {
+    fn as_tid(&self) -> Option<&Tid<T, C>> {
         if self.type_id != TypeId::of::<T>() {
             return None;
         }
@@ -74,24 +74,36 @@ impl<T: 'static> AsTid<T> for &Id {
     }
 }
 
-pub struct Storage {
-    data: HashMap<TypeId, Bucket>,
+pub struct Storage<C: CellCycle = u32> {
+    data: HashMap<TypeId, Bucket<C>>,
     capacity: BlockCapacity,
 }
 
-impl Storage {
+impl Storage<u32> {
     pub fn new() -> Self {
         Self::with_block_capacity(1024)
     }
 
     pub fn with_block_capacity(capacity: usize) -> Self {
-        Self {
+        Storage::new_with_cycle_and_block_capacity::<u32>(capacity)
+    }
+}
+
+impl Storage {
+    pub fn new_with_cycle<A: CellCycle>() -> Storage<A> {
+        Self::new_with_cycle_and_block_capacity(1024)
+    }
+
+    pub fn new_with_cycle_and_block_capacity<A: CellCycle>(capacity: usize) -> Storage<A> {
+        Storage {
             data: Default::default(),
             capacity: BlockCapacity::new(capacity),
         }
+        }
     }
 
-    pub fn place<T: 'static>(&mut self, data: T) -> Tid<T> {
+impl<C: CellCycle> Storage<C> {
+    pub fn place<T: 'static>(&mut self, data: T) -> Tid<T, C> {
         let (index, cycle) = unsafe {
             self.data
                 .entry(TypeId::of::<T>())
@@ -102,7 +114,7 @@ impl Storage {
         Tid::new(index, cycle)
     }
 
-    pub fn place_id<T: 'static>(&mut self, data: T) -> Id {
+    pub fn place_id<T: 'static>(&mut self, data: T) -> Id<C> {
         let type_id = TypeId::of::<T>();
         let (index, cycle) = unsafe {
             self.data
@@ -114,7 +126,7 @@ impl Storage {
         Id::new(index, cycle, type_id)
     }
 
-    pub fn remove<T: 'static>(&mut self, id: impl AsTid<T>) -> Option<T> {
+    pub fn remove<T: 'static>(&mut self, id: impl AsTid<T, C>) -> Option<T> {
         match id.as_tid() {
             Some(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
@@ -126,7 +138,7 @@ impl Storage {
         }
     }
 
-    pub fn get<T: 'static>(&self, id: impl AsTid<T>) -> Option<&T> {
+    pub fn get<T: 'static>(&self, id: impl AsTid<T, C>) -> Option<&T> {
         match id.as_tid() {
             Some(tid) => match self.data.get(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
@@ -138,7 +150,7 @@ impl Storage {
         }
     }
 
-    pub fn get_mut<T: 'static>(&mut self, id: impl AsTid<T>) -> Option<&mut T> {
+    pub fn get_mut<T: 'static>(&mut self, id: impl AsTid<T, C>) -> Option<&mut T> {
         match id.as_tid() {
             Some(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
@@ -150,7 +162,7 @@ impl Storage {
         }
     }
 
-    pub fn contains<T: 'static>(&self, id: impl AsTid<T>) -> bool {
+    pub fn contains<T: 'static>(&self, id: impl AsTid<T, C>) -> bool {
         match id.as_tid() {
             Some(tid) => match self.data.get(&TypeId::of::<T>()) {
                 Some(bucket) => bucket.contains(tid.index),
@@ -160,7 +172,7 @@ impl Storage {
         }
     }
 
-    pub fn contains_id(&self, id: &Id) -> bool {
+    pub fn contains_id(&self, id: &Id<C>) -> bool {
         match self.data.get(&id.type_id) {
             Some(bucket) => bucket.contains(id.index()),
             None => false,
@@ -190,7 +202,7 @@ impl Default for Storage {
     }
 }
 
-impl Drop for Storage {
+impl<C: CellCycle> Drop for Storage<C> {
     fn drop(&mut self) {
         for (_, bucket) in self.data.iter_mut() {
             unsafe { Bucket::drop(bucket, self.capacity) }

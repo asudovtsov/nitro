@@ -3,7 +3,7 @@ use core::any::TypeId;
 use std::collections::HashMap;
 
 pub trait AsTid<T> {
-    fn as_tid(&self) -> &Tid<T>;
+    fn as_tid(&self) -> Option<&Tid<T>>;
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
@@ -32,8 +32,8 @@ impl<T> Tid<T> {
 }
 
 impl<T> AsTid<T> for &Tid<T> {
-    fn as_tid(&self) -> &Tid<T> {
-        self
+    fn as_tid(&self) -> Option<&Tid<T>> {
+        Some(self)
     }
 }
 
@@ -65,9 +65,12 @@ impl<T: 'static> From<Tid<T>> for Id {
     }
 }
 
-impl<T> AsTid<T> for &Id {
-    fn as_tid(&self) -> &Tid<T> {
-        unsafe { std::mem::transmute(&self.tid) }
+impl<T: 'static> AsTid<T> for &Id {
+    fn as_tid(&self) -> Option<&Tid<T>> {
+        if self.type_id != TypeId::of::<T>() {
+            return None;
+        }
+        Some(unsafe { std::mem::transmute(&self.tid) })
     }
 }
 
@@ -114,36 +117,48 @@ impl Storage {
     }
 
     pub fn remove<T: 'static>(&mut self, id: impl AsTid<T>) -> Option<T> {
-        match self.data.get_mut(&TypeId::of::<T>()) {
-            Some(bucket) if id.as_tid().index < bucket.len() => unsafe {
-                bucket.try_remove(self.capacity, id.as_tid().index)
+        match id.as_tid() {
+            Some(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
+                Some(bucket) if tid.index < bucket.len() => unsafe {
+                    bucket.try_remove(self.capacity, tid.index)
                 },
                 _ => None,
+            },
+            None => None,
         }
     }
 
     pub fn get<T: 'static>(&self, id: impl AsTid<T>) -> Option<&T> {
-        match self.data.get(&TypeId::of::<T>()) {
-            Some(bucket) if id.as_tid().index < bucket.len() => unsafe {
-                bucket.try_get(self.capacity, id.as_tid().index)
+        match id.as_tid() {
+            Some(tid) => match self.data.get(&TypeId::of::<T>()) {
+                Some(bucket) if tid.index < bucket.len() => unsafe {
+                    bucket.try_get(self.capacity, tid.index)
                 },
                 _ => None,
+            },
+            None => None,
         }
     }
 
     pub fn get_mut<T: 'static>(&mut self, id: impl AsTid<T>) -> Option<&mut T> {
-        match self.data.get_mut(&TypeId::of::<T>()) {
-            Some(bucket) if id.as_tid().index < bucket.len() => unsafe {
-                bucket.try_get_mut(self.capacity, id.as_tid().index)
+        match id.as_tid() {
+            Some(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
+                Some(bucket) if tid.index < bucket.len() => unsafe {
+                    bucket.try_get_mut(self.capacity, tid.index)
                 },
                 _ => None,
+            },
+            None => None,
         }
     }
 
     pub fn contains<T: 'static>(&self, id: impl AsTid<T>) -> bool {
-        match self.data.get(&TypeId::of::<T>()) {
-            Some(bucket) => bucket.contains(id.as_tid().index),
+        match id.as_tid() {
+            Some(tid) => match self.data.get(&TypeId::of::<T>()) {
+                Some(bucket) => bucket.contains(tid.index),
                 None => false,
+            },
+            None => false,
         }
     }
 
@@ -182,5 +197,64 @@ impl Drop for Storage {
         for (_, bucket) in self.data.iter_mut() {
             unsafe { Bucket::drop(bucket, self.capacity) }
         }
+    }
+}
+
+// #[derive(Debug)]
+// struct A {
+//     string: String,
+// }
+
+// impl Drop for A {
+//     fn drop(&mut self) {
+//         println!("###Drop A {:?}", self);
+//     }
+// }
+
+mod tests {
+    #[test]
+    fn place_remove_contains() {
+        use super::*;
+
+        type Color = (String, u8, u8, u8);
+        // struct Label(String);
+
+        let mut storage = Storage::new();
+        let red = storage.place((String::from("red"), 255, 0, 0));
+        let green = storage.place((String::from("green"), 0, 255, 0));
+
+        for i in 0..10_000_000 {
+            let index = storage.place::<Color>((String::from("red"), 255, 0, 0));
+            // storage.remove(&index);
+            if i % 10_000_000 - 1 == 0 {
+                println!(
+                    "! {} {:?} {} {}",
+                    i,
+                    index,
+                    storage.contains(&index),
+                    storage.dead_cells_count::<Color>()
+                );
+            }
+            let id = storage.place_id::<Color>((String::from("red"), 255, 0, 0));
+            storage.contains_id(&id);
+        }
+
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf);
+
+        // let blue = storage.place((String::from("blue"), 0, 0, 255));
+        // let label = storage.place(Label("label".into()));
+        // println!("{:?}\n{:?}\n{:?}", red, green, blue);
+        // println!(
+        //     "{:?}\n{:?}\n{:?}",
+        //     storage.contains(&red),
+        //     storage.contains(&green),
+        //     storage.contains(&blue)
+        // );
+
+        // assert!(storage.contains::<Color>(&red));
+        // assert!(storage.contains::<Color>(&green));
+        // assert!(storage.contains::<Color>(&blue));
+        // assert!(storage.contains::<Label>(&label));
     }
 }

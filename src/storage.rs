@@ -7,7 +7,7 @@ pub trait AsTid<T, C: CellCycle> {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-pub struct Tid<T, C: CellCycle = u32> {
+pub struct Tid<T, C: CellCycle> {
     index: usize,
     cycle: C,
     phantom: std::marker::PhantomData<T>,
@@ -38,7 +38,7 @@ impl<T, C: CellCycle> AsTid<T, C> for &Tid<T, C> {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Id<C: CellCycle = u32> {
+pub struct Id<C: CellCycle> {
     tid: Tid<(), C>,
     type_id: TypeId,
 }
@@ -65,7 +65,7 @@ impl<T: 'static, C: CellCycle> From<Tid<T, C>> for Id<C> {
     }
 }
 
-impl<T: 'static, C: CellCycle> AsTid<T, C> for &Id {
+impl<T: 'static, C: CellCycle> AsTid<T, C> for &Id<C> {
     fn as_tid(&self) -> Option<&Tid<T, C>> {
         if self.type_id != TypeId::of::<T>() {
             return None;
@@ -199,7 +199,7 @@ impl<C: CellCycle> Storage<C> {
     pub fn clear(&mut self) {
         for (_, bucket) in self.data.iter_mut() {
             unsafe {
-                Bucket::drop_data(bucket, self.capacity);
+                Bucket::clear(bucket, self.capacity);
             }
         }
     }

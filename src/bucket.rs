@@ -76,7 +76,7 @@ impl<C: CellCycle, T> Cell<C, T> {
     }
 }
 
-pub(crate) struct Bucket<C: CellCycle = u32, A: Allocator = Global> {
+pub(crate) struct Bucket<C: CellCycle, A: Allocator = Global> {
     blocks: Vec<*mut u8>,
     layout: Layout,
     len: usize,
@@ -84,6 +84,7 @@ pub(crate) struct Bucket<C: CellCycle = u32, A: Allocator = Global> {
     removed: HashSet<usize>,
     dead: HashSet<usize>,
     drop: unsafe fn(*mut u8),
+    reset_cycle: unsafe fn(*mut u8),
     alloc: A,
     phantom: PhantomData<C>,
 }
@@ -106,6 +107,9 @@ impl<C: CellCycle, A: Allocator> Bucket<C, A> {
             dead: HashSet::new(),
             drop: |pointer: *mut u8| unsafe {
                 pointer.cast::<Cell<C, T>>().read();
+            },
+            reset_cycle: |pointer: *mut u8| unsafe {
+                (*pointer.cast::<Cell<C, T>>()).cycle = Default::default();
             },
             alloc,
             phantom: Default::default(),
@@ -275,9 +279,34 @@ impl<C: CellCycle, A: Allocator> Bucket<C, A> {
         self.removed.shrink_to_fit();
     }
 
-    pub unsafe fn drop(bucket: &mut Self, capacity: BlockCapacity) {
+    pub unsafe fn reset(bucket: &mut Self, capacity: BlockCapacity) {
         if bucket.len == 0 {
             return;
+        }
+
+        let mut index = bucket.len;
+        loop {
+            if index == 0 {
+                break;
+            }
+
+            index -= 1;
+
+            let pointer = unsafe { bucket.get_pointer_ucnhecked(capacity, index) };
+            (bucket.reset_cycle)(pointer);
+
+            if !bucket.removed.contains(&index) && !bucket.dead.contains(&index) {
+                (bucket.drop)(pointer);
+            }
+        }
+
+        bucket.removed.clear();
+        bucket.dead.clear();
+    }
+
+    pub unsafe fn clear(bucket: &mut Self, capacity: BlockCapacity) -> bool {
+        if bucket.len == 0 {
+            return false;
         }
 
         let mut index = bucket.len;
@@ -294,6 +323,14 @@ impl<C: CellCycle, A: Allocator> Bucket<C, A> {
 
             let pointer = unsafe { bucket.get_pointer_ucnhecked(capacity, index) };
             (bucket.drop)(pointer);
+        }
+        bucket.len = 0;
+        true
+    }
+
+    pub unsafe fn drop(bucket: &mut Self, capacity: BlockCapacity) {
+        if !Self::clear(bucket, capacity) {
+            return;
         }
 
         let block_layout = core::alloc::Layout::from_size_align_unchecked(

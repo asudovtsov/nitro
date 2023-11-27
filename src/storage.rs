@@ -2,6 +2,10 @@ use crate::bucket::{BlockCapacity, Bucket};
 use core::any::TypeId;
 use std::collections::HashMap;
 
+pub trait AsTid<T> {
+    fn as_tid(&self) -> &Tid<T>;
+}
+
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct Tid<T> {
     index: usize,
@@ -27,45 +31,43 @@ impl<T> Tid<T> {
     }
 }
 
-impl<T: 'static> TryFrom<&Id> for Tid<T> {
-    type Error = ();
-    fn try_from(value: &Id) -> Result<Self, Self::Error> {
-        if value.type_id != TypeId::of::<T>() {
-            return Err(());
-        }
-
-        Ok(Tid {
-            index: value.index,
-            cycle: value.cycle,
-            phantom: Default::default(),
-        })
+impl<T> AsTid<T> for &Tid<T> {
+    fn as_tid(&self) -> &Tid<T> {
+        self
     }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Id {
-    index: usize,
-    cycle: u64,
+    tid: Tid<()>,
     type_id: TypeId,
 }
 
 impl Id {
-    fn new(index: usize, cycle: u64, type_id: TypeId) -> Self {
+    fn new(inbucket_index: usize, cycle: u64, type_id: TypeId) -> Self {
         Self {
-            index,
-            cycle,
+            tid: Tid::new(inbucket_index, cycle),
             type_id,
         }
+    }
+
+    fn index(&self) -> usize {
+        self.tid.index
     }
 }
 
 impl<T: 'static> From<Tid<T>> for Id {
     fn from(value: Tid<T>) -> Self {
         Self {
-            index: value.index,
-            cycle: value.cycle,
+            tid: Tid::new(value.index, value.cycle),
             type_id: TypeId::of::<T>(),
         }
+    }
+}
+
+impl<T> AsTid<T> for &Id {
+    fn as_tid(&self) -> &Tid<T> {
+        unsafe { std::mem::transmute(&self.tid) }
     }
 }
 
@@ -111,55 +113,43 @@ impl Storage {
         Id::new(index, cycle, type_id)
     }
 
-    pub fn remove<T: 'static>(&mut self, id: impl TryInto<Tid<T>>) -> Option<T> {
-        match id.try_into() {
-            Ok(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
-                Some(bucket) if tid.index < bucket.len() => unsafe {
-                    bucket.try_remove(self.capacity, tid.index)
+    pub fn remove<T: 'static>(&mut self, id: impl AsTid<T>) -> Option<T> {
+        match self.data.get_mut(&TypeId::of::<T>()) {
+            Some(bucket) if id.as_tid().index < bucket.len() => unsafe {
+                bucket.try_remove(self.capacity, id.as_tid().index)
                 },
                 _ => None,
-            },
-            Err(_) => None,
         }
     }
 
-    pub fn get<T: 'static>(&self, id: impl TryInto<Tid<T>>) -> Option<&T> {
-        match id.try_into() {
-            Ok(tid) => match self.data.get(&TypeId::of::<T>()) {
-                Some(bucket) if tid.index < bucket.len() => unsafe {
-                    bucket.try_get(self.capacity, tid.index)
+    pub fn get<T: 'static>(&self, id: impl AsTid<T>) -> Option<&T> {
+        match self.data.get(&TypeId::of::<T>()) {
+            Some(bucket) if id.as_tid().index < bucket.len() => unsafe {
+                bucket.try_get(self.capacity, id.as_tid().index)
                 },
                 _ => None,
-            },
-            Err(_) => None,
         }
     }
 
-    pub fn get_mut<T: 'static>(&mut self, id: impl TryInto<Tid<T>>) -> Option<&mut T> {
-        match id.try_into() {
-            Ok(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
-                Some(bucket) if tid.index < bucket.len() => unsafe {
-                    bucket.try_get_mut(self.capacity, tid.index)
+    pub fn get_mut<T: 'static>(&mut self, id: impl AsTid<T>) -> Option<&mut T> {
+        match self.data.get_mut(&TypeId::of::<T>()) {
+            Some(bucket) if id.as_tid().index < bucket.len() => unsafe {
+                bucket.try_get_mut(self.capacity, id.as_tid().index)
                 },
                 _ => None,
-            },
-            Err(_) => None,
         }
     }
 
-    pub fn contains<T: 'static>(&self, id: impl TryInto<Tid<T>>) -> bool {
-        match id.try_into() {
-            Ok(tid) => match self.data.get(&TypeId::of::<T>()) {
-                Some(bucket) => bucket.contains(tid.index),
+    pub fn contains<T: 'static>(&self, id: impl AsTid<T>) -> bool {
+        match self.data.get(&TypeId::of::<T>()) {
+            Some(bucket) => bucket.contains(id.as_tid().index),
                 None => false,
-            },
-            Err(_) => false,
         }
     }
 
     pub fn contains_id(&self, id: &Id) -> bool {
         match self.data.get(&id.type_id) {
-            Some(bucket) => bucket.contains(id.index),
+            Some(bucket) => bucket.contains(id.index()),
             None => false,
         }
     }

@@ -7,7 +7,7 @@ pub trait AsTid<T, C: CellCycle> {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-pub struct Tid<T, C: CellCycle> {
+pub struct Tid<T, C: CellCycle = u32> {
     index: usize,
     cycle: C,
     phantom: std::marker::PhantomData<T>,
@@ -38,7 +38,7 @@ impl<T, C: CellCycle> AsTid<T, C> for &Tid<T, C> {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Id<C: CellCycle> {
+pub struct Id<C: CellCycle = u32> {
     tid: Tid<(), C>,
     type_id: TypeId,
 }

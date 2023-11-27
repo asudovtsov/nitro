@@ -194,6 +194,24 @@ impl<C: CellCycle> Storage<C> {
         }
         self.data.shrink_to_fit();
     }
+
+    // remove all placed data
+    pub fn clear(&mut self) {
+        for (_, bucket) in self.data.iter_mut() {
+            unsafe {
+                Bucket::drop_data(bucket, self.capacity);
+            }
+        }
+    }
+
+    // remove all placed data, reset all cycles, reset all dead cells
+    pub fn reset(&mut self) {
+        for (_, bucket) in self.data.iter_mut() {
+            unsafe {
+                Bucket::reset(bucket, self.capacity);
+            }
+        }
+    }
 }
 
 impl Default for Storage {

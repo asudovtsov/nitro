@@ -88,8 +88,8 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
                 self.grow(capacity);
             }
 
-            let pointer = self.get_pointer_ucnhecked_for::<T>(capacity, index);
-            if (self.is_banned_cell)(pointer.cast()) {
+            let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+            if exists && (self.is_banned_cell)(pointer.cast()) {
                 if index == self.len {
                     self.len += 1;
                 }
@@ -97,7 +97,7 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
                 continue;
             }
 
-            let cycle = if index < self.cell_count {
+            let cycle = if exists {
                 (*pointer).cycle
             } else {
                 Default::default()
@@ -146,7 +146,9 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
             self.len -= 1;
         }
 
-        let pointer = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        debug_assert!(exists);
+
         if (self.is_banned_cell)(pointer.cast()) {
             return None;
         }
@@ -168,7 +170,9 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
             return None;
         }
 
-        let pointer = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        debug_assert!(exists);
+
         if (self.is_banned_cell)(pointer.cast()) {
             return None;
         }
@@ -197,7 +201,9 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
             return None;
         }
 
-        let pointer = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        debug_assert!(exists);
+
         if (self.is_banned_cell)(pointer.cast()) {
             return None;
         }
@@ -210,7 +216,9 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
             return false;
         }
         unsafe {
-            let pointer = self.get_pointer_ucnhecked(capacity, index);
+            let (pointer, exists) = self.get_pointer_ucnhecked(capacity, index);
+            debug_assert!(exists);
+
             !(self.is_banned_cell)(pointer) && !self.removed.contains(&index)
         }
     }
@@ -245,7 +253,8 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
 
             index -= 1;
 
-            let pointer = unsafe { bucket.get_pointer_ucnhecked(capacity, index) };
+            let (pointer, exists) = bucket.get_pointer_ucnhecked(capacity, index);
+            debug_assert!(exists);
 
             if !bucket.removed.contains(&index) && !(bucket.is_banned_cell)(pointer) {
                 (bucket.drop_cell)(pointer);
@@ -269,7 +278,9 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
 
             index -= 1;
 
-            let pointer = unsafe { bucket.get_pointer_ucnhecked(capacity, index) };
+            let (pointer, exists) = bucket.get_pointer_ucnhecked(capacity, index);
+            debug_assert!(exists);
+
             if (bucket.is_banned_cell)(pointer) || bucket.removed.contains(&index) {
                 continue;
             }
@@ -306,29 +317,33 @@ impl<C: Cycle, A: Allocator> Bucket<C, A> {
         self.blocks.push(pointer.as_ptr());
     }
 
-    unsafe fn get_pointer_ucnhecked(&self, capacity: BlockCapacity, index: usize) -> *mut u8 {
-        debug_assert!(index < self.len);
-        debug_assert!(!self.removed.contains(&index));
-
+    unsafe fn get_pointer_ucnhecked(
+        &self,
+        capacity: BlockCapacity,
+        index: usize,
+    ) -> (*mut u8, bool) {
         let block_index = index / capacity.0;
         let inblock_index = index % capacity.0;
         let block = self.blocks[block_index];
         let aligned = self.layout.pad_to_align();
-        block.add(aligned.size() * inblock_index)
+        (
+            block.add(aligned.size() * inblock_index),
+            index < self.cell_count,
+        )
     }
 
     unsafe fn get_pointer_ucnhecked_for<T>(
         &self,
         capacity: BlockCapacity,
         index: usize,
-    ) -> *mut Cell<C, T> {
-        debug_assert!(index < self.len);
-        debug_assert!(!self.removed.contains(&index));
-
+    ) -> (*mut Cell<C, T>, bool) {
         let block_index = index / capacity.0;
         let inblock_index = index % capacity.0;
         let block = self.blocks[block_index];
-        block.cast::<Cell<C, T>>().add(inblock_index)
+        (
+            block.cast::<Cell<C, T>>().add(inblock_index),
+            index < self.cell_count,
+        )
     }
 
     fn next_index(&mut self) -> usize {

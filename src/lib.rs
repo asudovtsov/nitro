@@ -1,2 +1,5 @@
 mod bucket;
-pub mod storage;
+mod storage;
+
+pub use crate::bucket::CellCycle;
+pub use crate::storage::{Id, Storage, Tid};

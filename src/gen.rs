@@ -1,4 +1,4 @@
-pub trait Cycle: Copy + Default {
+pub trait Gen: Copy + Default {
     fn next(self) -> Self;
     fn is_over(&self) -> bool;
     fn max(&self) -> u128;
@@ -6,27 +6,9 @@ pub trait Cycle: Copy + Default {
 }
 
 #[derive(Copy, Clone, Default, Debug)]
-pub struct NoCycle;
+pub struct NoGen;
 
-#[derive(Copy, Clone, Default, Debug)]
-pub struct Blocking32(u32);
-
-#[derive(Copy, Clone, Default, Debug)]
-pub struct Blocking64(u64);
-
-#[derive(Copy, Clone, Default, Debug)]
-pub struct Blocking128(u128);
-
-#[derive(Copy, Clone, Default, Debug)]
-pub struct NonBlocking32(u32);
-
-#[derive(Copy, Clone, Default, Debug)]
-pub struct NonBlocking64(u64);
-
-#[derive(Copy, Clone, Default, Debug)]
-pub struct NonBlocking128(u128);
-
-impl Cycle for NoCycle {
+impl Gen for NoGen {
     fn next(self) -> Self {
         self
     }
@@ -41,7 +23,10 @@ impl Cycle for NoCycle {
     }
 }
 
-impl Cycle for Blocking32 {
+#[derive(Copy, Clone, Default, Debug)]
+pub struct Unique32(u32);
+
+impl Gen for Unique32 {
     fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -56,7 +41,10 @@ impl Cycle for Blocking32 {
     }
 }
 
-impl Cycle for Blocking64 {
+#[derive(Copy, Clone, Default, Debug)]
+pub struct Unique64(u64);
+
+impl Gen for Unique64 {
     fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -71,7 +59,10 @@ impl Cycle for Blocking64 {
     }
 }
 
-impl Cycle for Blocking128 {
+#[derive(Copy, Clone, Default, Debug)]
+pub struct Unique128(u128);
+
+impl Gen for Unique128 {
     fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -86,7 +77,10 @@ impl Cycle for Blocking128 {
     }
 }
 
-impl Cycle for NonBlocking32 {
+#[derive(Copy, Clone, Default, Debug)]
+pub struct RepeatIn32(u32);
+
+impl Gen for RepeatIn32 {
     fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }
@@ -101,7 +95,10 @@ impl Cycle for NonBlocking32 {
     }
 }
 
-impl Cycle for NonBlocking64 {
+#[derive(Copy, Clone, Default, Debug)]
+pub struct RepeatIn64(u64);
+
+impl Gen for RepeatIn64 {
     fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }
@@ -116,7 +113,10 @@ impl Cycle for NonBlocking64 {
     }
 }
 
-impl Cycle for NonBlocking128 {
+#[derive(Copy, Clone, Default, Debug)]
+pub struct RepeatIn128(u128);
+
+impl Gen for RepeatIn128 {
     fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }

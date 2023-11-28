@@ -1,11 +1,14 @@
-pub trait Gen: Copy + Default {
+use core::hash::Hash;
+use std::fmt::Debug;
+
+pub trait Gen: Copy + Clone + Eq + PartialEq + Default + Hash + Debug {
     fn next(self) -> Self;
     fn is_over(&self) -> bool;
     fn max(&self) -> u128;
     fn current(&self) -> u128;
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct NoGen;
 
 impl Gen for NoGen {
@@ -23,7 +26,7 @@ impl Gen for NoGen {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct Unique32(u32);
 
 impl Gen for Unique32 {
@@ -41,7 +44,7 @@ impl Gen for Unique32 {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct Unique64(u64);
 
 impl Gen for Unique64 {
@@ -59,7 +62,7 @@ impl Gen for Unique64 {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct Unique128(u128);
 
 impl Gen for Unique128 {
@@ -77,7 +80,7 @@ impl Gen for Unique128 {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct RepeatIn32(u32);
 
 impl Gen for RepeatIn32 {
@@ -95,7 +98,7 @@ impl Gen for RepeatIn32 {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct RepeatIn64(u64);
 
 impl Gen for RepeatIn64 {
@@ -113,7 +116,7 @@ impl Gen for RepeatIn64 {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct RepeatIn128(u128);
 
 impl Gen for RepeatIn128 {

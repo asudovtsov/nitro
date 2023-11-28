@@ -9,19 +9,11 @@ pub trait AsTid<T, G: Gen> {
     fn as_tid(&self) -> Option<&Tid<T, G>>;
 }
 
-#[derive(Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Tid<T, G: Gen = Unique32> {
     index: usize,
     gen: G,
     phantom: std::marker::PhantomData<T>,
-}
-
-impl<T, G: Gen> Copy for Tid<T, G> {}
-
-impl<T, G: Gen> Clone for Tid<T, G> {
-    fn clone(&self) -> Self {
-        *self
-    }
 }
 
 impl<T, G: Gen> Tid<T, G> {

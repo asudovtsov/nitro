@@ -66,7 +66,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         if self.layout != Layout::new::<Cell<G, T>>() {
             return None;
         }
-        Some(self.place_unchecked(capacity, data))
+        unsafe { Some(self.place_unchecked(capacity, data)) }
     }
 
     pub unsafe fn place_unchecked<T>(&mut self, capacity: usize, data: T) -> (usize, G) {
@@ -76,11 +76,13 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         loop {
             let block_index = index / capacity;
             if block_index >= self.blocks.len() {
-                self.grow(capacity);
+                unsafe {
+                    self.grow(capacity);
+                }
             }
 
-            let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
-            if exists && (self.is_banned_cell)(pointer.cast()) {
+            let (pointer, exists) = unsafe { self.get_pointer_ucnhecked_for::<T>(capacity, index) };
+            if exists && unsafe { (self.is_banned_cell)(pointer.cast()) } {
                 if index == self.len {
                     self.len += 1;
                 }
@@ -89,7 +91,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
             }
 
             let gen = if exists {
-                (*pointer).gen
+                unsafe { (*pointer).gen }
             } else {
                 Default::default()
             };
@@ -102,7 +104,9 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
                 continue;
             }
 
-            pointer.write(Cell::new(gen.next(), data));
+            unsafe {
+                pointer.write(Cell::new(gen.next(), data));
+            }
             self.removed.remove(&index);
             if index == self.len {
                 self.len += 1;
@@ -120,7 +124,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         if self.layout != Layout::new::<Cell<G, T>>() {
             return None;
         }
-        self.remove_unchecked(capacity, index)
+        unsafe { self.remove_unchecked(capacity, index) }
     }
 
     pub unsafe fn remove_unchecked<T>(&mut self, capacity: usize, index: usize) -> Option<T> {
@@ -133,7 +137,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
             self.len -= 1;
         }
 
-        let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        let (pointer, exists) = unsafe { self.get_pointer_ucnhecked_for::<T>(capacity, index) };
         debug_assert!(exists);
 
         if (self.is_banned_cell)(pointer.cast()) {
@@ -141,14 +145,14 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         }
 
         self.removed.insert(index);
-        Some(pointer.read().data)
+        unsafe { Some(pointer.read().data) }
     }
 
     pub unsafe fn try_get<T>(&self, capacity: usize, index: usize) -> Option<&T> {
         if self.layout != Layout::new::<Cell<G, T>>() {
             return None;
         }
-        self.get_ucnhecked(capacity, index)
+        unsafe { self.get_ucnhecked(capacity, index) }
     }
 
     pub unsafe fn get_ucnhecked<T>(&self, capacity: usize, index: usize) -> Option<&T> {
@@ -157,21 +161,21 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
             return None;
         }
 
-        let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        let (pointer, exists) = unsafe { self.get_pointer_ucnhecked_for::<T>(capacity, index) };
         debug_assert!(exists);
 
-        if (self.is_banned_cell)(pointer.cast()) {
+        if unsafe { (self.is_banned_cell)(pointer.cast()) } {
             return None;
         }
 
-        Some(&(*pointer).data)
+        unsafe { Some(&(*pointer).data) }
     }
 
     pub unsafe fn try_get_mut<T>(&mut self, capacity: usize, index: usize) -> Option<&mut T> {
         if self.layout != Layout::new::<Cell<G, T>>() {
             return None;
         }
-        self.get_mut_unchecked(capacity, index)
+        unsafe { self.get_mut_unchecked(capacity, index) }
     }
 
     pub unsafe fn get_mut_unchecked<T>(&mut self, capacity: usize, index: usize) -> Option<&mut T> {
@@ -180,14 +184,14 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
             return None;
         }
 
-        let (pointer, exists) = self.get_pointer_ucnhecked_for::<T>(capacity, index);
+        let (pointer, exists) = unsafe { self.get_pointer_ucnhecked_for::<T>(capacity, index) };
         debug_assert!(exists);
 
-        if (self.is_banned_cell)(pointer.cast()) {
+        if unsafe { (self.is_banned_cell)(pointer.cast()) } {
             return None;
         }
 
-        Some(&mut (*pointer).data)
+        unsafe { Some(&mut (*pointer).data) }
     }
 
     pub fn contains(&self, capacity: usize, index: usize) -> bool {
@@ -204,14 +208,18 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
 
     pub unsafe fn shrink_to_fit(&mut self, capacity: usize) {
         let free_block_count = (self.cell_count - self.len) / capacity;
-        let block_layout = core::alloc::Layout::from_size_align_unchecked(
-            self.layout.size() * capacity,
-            self.layout.align(),
-        );
+        let block_layout = unsafe {
+            core::alloc::Layout::from_size_align_unchecked(
+                self.layout.size() * capacity,
+                self.layout.align(),
+            )
+        };
 
         for block in self.blocks.iter_mut().rev().take(free_block_count) {
-            self.alloc
-                .deallocate(NonNull::new_unchecked(*block), block_layout)
+            unsafe {
+                self.alloc
+                    .deallocate(NonNull::new_unchecked(*block), block_layout)
+            }
         }
 
         self.cell_count = self.len;
@@ -232,13 +240,17 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
 
             index -= 1;
 
-            let (pointer, exists) = bucket.get_pointer_ucnhecked(capacity, index);
+            let (pointer, exists) = unsafe { bucket.get_pointer_ucnhecked(capacity, index) };
             debug_assert!(exists);
 
-            if !bucket.removed.contains(&index) && !(bucket.is_banned_cell)(pointer) {
-                (bucket.drop_cell)(pointer);
+            if !bucket.removed.contains(&index) && unsafe { !(bucket.is_banned_cell)(pointer) } {
+                unsafe {
+                    (bucket.drop_cell)(pointer);
+                }
             }
-            (bucket.reset_cell_gen)(pointer);
+            unsafe {
+                (bucket.reset_cell_gen)(pointer);
+            }
         }
 
         bucket.removed.clear();
@@ -257,13 +269,13 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
 
             index -= 1;
 
-            let (pointer, exists) = bucket.get_pointer_ucnhecked(capacity, index);
+            let (pointer, exists) = unsafe { bucket.get_pointer_ucnhecked(capacity, index) };
             debug_assert!(exists);
 
-            if (bucket.is_banned_cell)(pointer) || bucket.removed.contains(&index) {
+            if unsafe { (bucket.is_banned_cell)(pointer) } || bucket.removed.contains(&index) {
                 continue;
             }
-            (bucket.drop_cell)(pointer);
+            unsafe { (bucket.drop_cell)(pointer) };
         }
         bucket.len = 0;
         true
@@ -287,10 +299,12 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
     }
 
     unsafe fn grow(&mut self, capacity: usize) {
-        let block_layout = core::alloc::Layout::from_size_align_unchecked(
-            self.layout.size() * capacity,
-            self.layout.align(),
-        );
+        let block_layout = unsafe {
+            core::alloc::Layout::from_size_align_unchecked(
+                self.layout.size() * capacity,
+                self.layout.align(),
+            )
+        };
 
         let pointer = self.alloc.allocate(block_layout).unwrap().cast::<u8>();
         self.blocks.push(pointer.as_ptr());
@@ -302,7 +316,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         let block = self.blocks[block_index];
         let aligned = self.layout.pad_to_align();
         (
-            block.add(aligned.size() * inblock_index),
+            unsafe { block.add(aligned.size() * inblock_index) },
             index < self.cell_count,
         )
     }
@@ -316,7 +330,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         let inblock_index = index % capacity;
         let block = self.blocks[block_index];
         (
-            block.cast::<Cell<G, T>>().add(inblock_index),
+            unsafe { block.cast::<Cell<G, T>>().add(inblock_index) },
             index < self.cell_count,
         )
     }

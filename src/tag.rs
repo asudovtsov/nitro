@@ -1,7 +1,7 @@
 use core::hash::Hash;
 use std::fmt::Debug;
 
-pub trait Gen: Copy + Clone + Eq + PartialEq + Default + Hash + Debug {
+pub trait UniqueTag: Copy + Clone + Eq + PartialEq + Default + Hash + Debug {
     fn next(self) -> Self;
     fn is_over(&self) -> bool;
     fn max(&self) -> u128;
@@ -9,9 +9,9 @@ pub trait Gen: Copy + Clone + Eq + PartialEq + Default + Hash + Debug {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
-pub struct NoGen;
+pub struct NoTag;
 
-impl Gen for NoGen {
+impl UniqueTag for NoTag {
     fn next(self) -> Self {
         self
     }
@@ -29,7 +29,7 @@ impl Gen for NoGen {
 #[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct Unique32(u32);
 
-impl Gen for Unique32 {
+impl UniqueTag for Unique32 {
     fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -47,7 +47,7 @@ impl Gen for Unique32 {
 #[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct Unique64(u64);
 
-impl Gen for Unique64 {
+impl UniqueTag for Unique64 {
     fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -65,7 +65,7 @@ impl Gen for Unique64 {
 #[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct Unique128(u128);
 
-impl Gen for Unique128 {
+impl UniqueTag for Unique128 {
     fn next(self) -> Self {
         Self(self.0.saturating_add(1))
     }
@@ -83,7 +83,7 @@ impl Gen for Unique128 {
 #[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct RepeatIn32(u32);
 
-impl Gen for RepeatIn32 {
+impl UniqueTag for RepeatIn32 {
     fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }
@@ -101,7 +101,7 @@ impl Gen for RepeatIn32 {
 #[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct RepeatIn64(u64);
 
-impl Gen for RepeatIn64 {
+impl UniqueTag for RepeatIn64 {
     fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }
@@ -119,7 +119,7 @@ impl Gen for RepeatIn64 {
 #[derive(Copy, Clone, Eq, PartialEq, Default, Hash, Debug)]
 pub struct RepeatIn128(u128);
 
-impl Gen for RepeatIn128 {
+impl UniqueTag for RepeatIn128 {
     fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }

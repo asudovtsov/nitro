@@ -1,47 +1,47 @@
 use crate::{
     bucket::Bucket,
-    gen::{Gen, Unique32},
+    tag::{Unique32, UniqueTag},
 };
 use core::any::TypeId;
 use std::collections::HashMap;
 
-pub trait AsTid<T, G: Gen> {
-    fn as_tid(&self) -> Option<&Tid<T, G>>;
+pub trait AsTid<T, U: UniqueTag> {
+    fn as_tid(&self) -> Option<&Tid<T, U>>;
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Tid<T, G: Gen = Unique32> {
+pub struct Tid<T, U: UniqueTag = Unique32> {
     index: usize,
-    gen: G,
+    tag: U,
     phantom: std::marker::PhantomData<T>,
 }
 
-impl<T, G: Gen> Tid<T, G> {
-    fn new(inbucket_index: usize, gen: G) -> Self {
+impl<T, U: UniqueTag> Tid<T, U> {
+    fn new(inbucket_index: usize, tag: U) -> Self {
         Self {
             index: inbucket_index,
-            gen,
+            tag,
             phantom: Default::default(),
         }
     }
 }
 
-impl<T, G: Gen> AsTid<T, G> for &Tid<T, G> {
-    fn as_tid(&self) -> Option<&Tid<T, G>> {
+impl<T, U: UniqueTag> AsTid<T, U> for &Tid<T, U> {
+    fn as_tid(&self) -> Option<&Tid<T, U>> {
         Some(self)
     }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Id<G: Gen = Unique32> {
-    tid: Tid<(), G>,
+pub struct Id<U: UniqueTag = Unique32> {
+    tid: Tid<(), U>,
     type_id: TypeId,
 }
 
-impl<G: Gen> Id<G> {
-    fn new(inbucket_index: usize, gen: G, type_id: TypeId) -> Self {
+impl<U: UniqueTag> Id<U> {
+    fn new(inbucket_index: usize, tag: U, type_id: TypeId) -> Self {
         Self {
-            tid: Tid::new(inbucket_index, gen),
+            tid: Tid::new(inbucket_index, tag),
             type_id,
         }
     }
@@ -51,17 +51,17 @@ impl<G: Gen> Id<G> {
     }
 }
 
-impl<T: 'static, G: Gen> From<Tid<T, G>> for Id<G> {
-    fn from(value: Tid<T, G>) -> Self {
+impl<T: 'static, U: UniqueTag> From<Tid<T, U>> for Id<U> {
+    fn from(value: Tid<T, U>) -> Self {
         Self {
-            tid: Tid::new(value.index, value.gen),
+            tid: Tid::new(value.index, value.tag),
             type_id: TypeId::of::<T>(),
         }
     }
 }
 
-impl<T: 'static, G: Gen> AsTid<T, G> for &Id<G> {
-    fn as_tid(&self) -> Option<&Tid<T, G>> {
+impl<T: 'static, U: UniqueTag> AsTid<T, U> for &Id<U> {
+    fn as_tid(&self) -> Option<&Tid<T, U>> {
         if self.type_id != TypeId::of::<T>() {
             return None;
         }
@@ -69,8 +69,8 @@ impl<T: 'static, G: Gen> AsTid<T, G> for &Id<G> {
     }
 }
 
-pub struct Storage<G: Gen = Unique32> {
-    data: HashMap<TypeId, Bucket<G>>,
+pub struct Storage<U: UniqueTag = Unique32> {
+    data: HashMap<TypeId, Bucket<U>>,
     capacity: usize,
 }
 
@@ -80,16 +80,16 @@ impl Storage<Unique32> {
     }
 
     pub fn with_block_capacity(capacity: usize) -> Self {
-        Storage::new_with_gen_and_block_capacity::<Unique32>(capacity)
+        Storage::new_with_tag_and_block_capacity::<Unique32>(capacity)
     }
 }
 
 impl Storage {
-    pub fn new_with_gen<G: Gen>() -> Storage<G> {
-        Self::new_with_gen_and_block_capacity(1024)
+    pub fn new_with_tag<U: UniqueTag>() -> Storage<U> {
+        Self::new_with_tag_and_block_capacity(1024)
     }
 
-    pub fn new_with_gen_and_block_capacity<G: Gen>(capacity: usize) -> Storage<G> {
+    pub fn new_with_tag_and_block_capacity<U: UniqueTag>(capacity: usize) -> Storage<U> {
         Storage {
             data: Default::default(),
             capacity,
@@ -97,31 +97,31 @@ impl Storage {
     }
 }
 
-impl<G: Gen> Storage<G> {
-    pub fn place<T: 'static>(&mut self, data: T) -> Tid<T, G> {
-        let (index, gen) = unsafe {
+impl<U: UniqueTag> Storage<U> {
+    pub fn place<T: 'static>(&mut self, data: T) -> Tid<T, U> {
+        let (index, tag) = unsafe {
             self.data
                 .entry(TypeId::of::<T>())
                 .or_insert(Bucket::new::<T>())
                 .place_unchecked(self.capacity, data)
         };
 
-        Tid::new(index, gen)
+        Tid::new(index, tag)
     }
 
-    pub fn place_id<T: 'static>(&mut self, data: T) -> Id<G> {
+    pub fn place_id<T: 'static>(&mut self, data: T) -> Id<U> {
         let type_id = TypeId::of::<T>();
-        let (index, gen) = unsafe {
+        let (index, tag) = unsafe {
             self.data
                 .entry(type_id)
                 .or_insert(Bucket::new::<T>())
                 .place_unchecked(self.capacity, data)
         };
 
-        Id::new(index, gen, type_id)
+        Id::new(index, tag, type_id)
     }
 
-    pub fn remove<T: 'static>(&mut self, id: impl AsTid<T, G>) -> Option<T> {
+    pub fn remove<T: 'static>(&mut self, id: impl AsTid<T, U>) -> Option<T> {
         match id.as_tid() {
             Some(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
@@ -133,7 +133,7 @@ impl<G: Gen> Storage<G> {
         }
     }
 
-    pub fn get<T: 'static>(&self, id: impl AsTid<T, G>) -> Option<&T> {
+    pub fn get<T: 'static>(&self, id: impl AsTid<T, U>) -> Option<&T> {
         match id.as_tid() {
             Some(tid) => match self.data.get(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
@@ -145,7 +145,7 @@ impl<G: Gen> Storage<G> {
         }
     }
 
-    pub fn get_mut<T: 'static>(&mut self, id: impl AsTid<T, G>) -> Option<&mut T> {
+    pub fn get_mut<T: 'static>(&mut self, id: impl AsTid<T, U>) -> Option<&mut T> {
         match id.as_tid() {
             Some(tid) => match self.data.get_mut(&TypeId::of::<T>()) {
                 Some(bucket) if tid.index < bucket.len() => unsafe {
@@ -157,7 +157,7 @@ impl<G: Gen> Storage<G> {
         }
     }
 
-    pub fn contains<T: 'static>(&self, id: impl AsTid<T, G>) -> bool {
+    pub fn contains<T: 'static>(&self, id: impl AsTid<T, U>) -> bool {
         match id.as_tid() {
             Some(tid) => match self.data.get(&TypeId::of::<T>()) {
                 Some(bucket) => bucket.contains(self.capacity, tid.index),
@@ -167,7 +167,7 @@ impl<G: Gen> Storage<G> {
         }
     }
 
-    pub fn contains_id(&self, id: &Id<G>) -> bool {
+    pub fn contains_id(&self, id: &Id<U>) -> bool {
         match self.data.get(&id.type_id) {
             Some(bucket) => bucket.contains(self.capacity, id.index()),
             None => false,
@@ -192,7 +192,7 @@ impl<G: Gen> Storage<G> {
         }
     }
 
-    // remove all placed data, reset all gens, reset all banned cells
+    // remove all placed data, reset all unique tags, reset all banned cells
     pub fn reset(&mut self) {
         for (_, bucket) in self.data.iter_mut() {
             unsafe {
@@ -208,7 +208,7 @@ impl Default for Storage {
     }
 }
 
-impl<G: Gen> Drop for Storage<G> {
+impl<U: UniqueTag> Drop for Storage<U> {
     fn drop(&mut self) {
         for (_, bucket) in self.data.iter_mut() {
             unsafe { Bucket::drop(bucket, self.capacity) }
@@ -235,7 +235,7 @@ mod tests {
         type Color = (String, u8, u8, u8);
         // struct Label(String);
 
-        let mut storage = Storage::new_with_gen::<crate::gen::NoGen>();
+        let mut storage = Storage::new_with_tag::<crate::tag::NoTag>();
         // let red = storage.place((String::from("red"), 255, 0, 0));
         // let green = storage.place((String::from("green"), 0, 255, 0));
 

@@ -1,43 +1,43 @@
-use crate::gen::Gen;
+use crate::tag::UniqueTag;
 use allocator_api2::alloc::{Allocator, Global};
 use core::alloc::Layout;
 use core::ptr::NonNull;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 
-struct Cell<G: Gen, T> {
-    gen: G,
+struct Cell<U: UniqueTag, T> {
+    tag: U,
     data: T,
 }
 
-impl<G: Gen, T> Cell<G, T> {
-    fn new(gen: G, data: T) -> Self {
-        Self { gen, data }
+impl<U: UniqueTag, T> Cell<U, T> {
+    fn new(tag: U, data: T) -> Self {
+        Self { tag, data }
     }
 }
 
-pub(crate) struct Bucket<G: Gen, A: Allocator = Global> {
+pub(crate) struct Bucket<U: UniqueTag, A: Allocator = Global> {
     blocks: Vec<*mut u8>,
     layout: Layout,
     len: usize,
     cell_count: usize,
     removed: HashSet<usize>,
     is_banned_cell: unsafe fn(*mut u8) -> bool,
-    reset_cell_gen: unsafe fn(*mut u8),
+    reset_cell_tag: unsafe fn(*mut u8),
     drop_cell: unsafe fn(*mut u8),
     alloc: A,
-    phantom: PhantomData<G>,
+    phantom: PhantomData<U>,
 }
 
-impl<G: Gen> Bucket<G, Global> {
+impl<U: UniqueTag> Bucket<U, Global> {
     pub fn new<T>() -> Self {
         Self::new_in::<T>(Global)
     }
 }
 
-impl<G: Gen, A: Allocator> Bucket<G, A> {
+impl<U: UniqueTag, A: Allocator> Bucket<U, A> {
     pub fn new_in<T>(alloc: A) -> Self {
-        let layout = Layout::new::<Cell<G, T>>();
+        let layout = Layout::new::<Cell<U, T>>();
         Self {
             blocks: vec![],
             layout,
@@ -45,13 +45,13 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
             cell_count: 0,
             removed: HashSet::new(),
             is_banned_cell: |pointer: *mut u8| unsafe {
-                (*pointer.cast::<Cell<G, T>>()).gen.is_over()
+                (*pointer.cast::<Cell<U, T>>()).tag.is_over()
             },
-            reset_cell_gen: |pointer: *mut u8| unsafe {
-                (*pointer.cast::<Cell<G, T>>()).gen = Default::default();
+            reset_cell_tag: |pointer: *mut u8| unsafe {
+                (*pointer.cast::<Cell<U, T>>()).tag = Default::default();
             },
             drop_cell: |pointer: *mut u8| unsafe {
-                pointer.cast::<Cell<G, T>>().read();
+                pointer.cast::<Cell<U, T>>().read();
             },
             alloc,
             phantom: Default::default(),
@@ -62,15 +62,15 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         self.len
     }
 
-    pub unsafe fn try_place<T>(&mut self, capacity: usize, data: T) -> Option<(usize, G)> {
-        if self.layout != Layout::new::<Cell<G, T>>() {
+    pub unsafe fn try_place<T>(&mut self, capacity: usize, data: T) -> Option<(usize, U)> {
+        if self.layout != Layout::new::<Cell<U, T>>() {
             return None;
         }
         unsafe { Some(self.place_unchecked(capacity, data)) }
     }
 
-    pub unsafe fn place_unchecked<T>(&mut self, capacity: usize, data: T) -> (usize, G) {
-        debug_assert!(self.layout == Layout::new::<Cell<G, T>>());
+    pub unsafe fn place_unchecked<T>(&mut self, capacity: usize, data: T) -> (usize, U) {
+        debug_assert!(self.layout == Layout::new::<Cell<U, T>>());
 
         let mut index = self.next_index();
         loop {
@@ -90,13 +90,13 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
                 continue;
             }
 
-            let gen = if exists {
-                unsafe { (*pointer).gen }
+            let tag = if exists {
+                unsafe { (*pointer).tag }
             } else {
                 Default::default()
             };
 
-            if gen.is_over() {
+            if tag.is_over() {
                 if index == self.len {
                     self.len += 1;
                 }
@@ -105,7 +105,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
             }
 
             unsafe {
-                pointer.write(Cell::new(gen.next(), data));
+                pointer.write(Cell::new(tag.next(), data));
             }
             self.removed.remove(&index);
             if index == self.len {
@@ -116,19 +116,19 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
                 self.cell_count = self.len;
             }
 
-            return (index, gen);
+            return (index, tag);
         }
     }
 
     pub unsafe fn try_remove<T>(&mut self, capacity: usize, index: usize) -> Option<T> {
-        if self.layout != Layout::new::<Cell<G, T>>() {
+        if self.layout != Layout::new::<Cell<U, T>>() {
             return None;
         }
         unsafe { self.remove_unchecked(capacity, index) }
     }
 
     pub unsafe fn remove_unchecked<T>(&mut self, capacity: usize, index: usize) -> Option<T> {
-        debug_assert!(self.layout == Layout::new::<Cell<G, T>>());
+        debug_assert!(self.layout == Layout::new::<Cell<U, T>>());
         if index >= self.len || self.removed.contains(&index) {
             return None;
         }
@@ -149,14 +149,14 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
     }
 
     pub unsafe fn try_get<T>(&self, capacity: usize, index: usize) -> Option<&T> {
-        if self.layout != Layout::new::<Cell<G, T>>() {
+        if self.layout != Layout::new::<Cell<U, T>>() {
             return None;
         }
         unsafe { self.get_ucnhecked(capacity, index) }
     }
 
     pub unsafe fn get_ucnhecked<T>(&self, capacity: usize, index: usize) -> Option<&T> {
-        debug_assert!(self.layout == Layout::new::<Cell<G, T>>());
+        debug_assert!(self.layout == Layout::new::<Cell<U, T>>());
         if index >= self.len || self.removed.contains(&index) {
             return None;
         }
@@ -172,14 +172,14 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
     }
 
     pub unsafe fn try_get_mut<T>(&mut self, capacity: usize, index: usize) -> Option<&mut T> {
-        if self.layout != Layout::new::<Cell<G, T>>() {
+        if self.layout != Layout::new::<Cell<U, T>>() {
             return None;
         }
         unsafe { self.get_mut_unchecked(capacity, index) }
     }
 
     pub unsafe fn get_mut_unchecked<T>(&mut self, capacity: usize, index: usize) -> Option<&mut T> {
-        debug_assert!(self.layout == Layout::new::<Cell<G, T>>());
+        debug_assert!(self.layout == Layout::new::<Cell<U, T>>());
         if index >= self.len || self.removed.contains(&index) {
             return None;
         }
@@ -249,7 +249,7 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
                 }
             }
             unsafe {
-                (bucket.reset_cell_gen)(pointer);
+                (bucket.reset_cell_tag)(pointer);
             }
         }
 
@@ -325,12 +325,12 @@ impl<G: Gen, A: Allocator> Bucket<G, A> {
         &self,
         capacity: usize,
         index: usize,
-    ) -> (*mut Cell<G, T>, bool) {
+    ) -> (*mut Cell<U, T>, bool) {
         let block_index = index / capacity;
         let inblock_index = index % capacity;
         let block = self.blocks[block_index];
         (
-            unsafe { block.cast::<Cell<G, T>>().add(inblock_index) },
+            unsafe { block.cast::<Cell<U, T>>().add(inblock_index) },
             index < self.cell_count,
         )
     }

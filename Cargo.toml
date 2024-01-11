@@ -7,3 +7,18 @@ edition = "2021"
 
 [dependencies]
 allocator-api2 = "0.2"
+
+[dev-dependencies]
+criterion = "0.5"
+shared_arena = "0.8.4"
+generational-arena = "0.2"
+froggy = "0.4"
+blink-alloc = "0.3.1"
+hecs = "0.10"
+shipyard = "0.6"
+edict = "0.5"
+rand = "0.8"
+
+[[bench]]
+name = "storage-comparison"
+harness = false

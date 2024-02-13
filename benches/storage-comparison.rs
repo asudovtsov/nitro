@@ -146,7 +146,7 @@ fn insert(c: &mut Criterion) {
             BatchSize::SmallInput,
         )
     });
-    g.bench_function("nitro-v2", |b| {
+    g.bench_function("nitro", |b| {
         b.iter_batched_ref(
             nitro::Storage::new,
             |s| {
@@ -172,7 +172,7 @@ fn insert(c: &mut Criterion) {
 //             BatchSize::SmallInput,
 //         )
 //     });
-//     g.bench_function("nitro-v2", |b| {
+//     g.bench_function("nitro", |b| {
 //         b.iter_batched_ref(
 //             nitro::Storage::new,
 //             |s| {
@@ -316,7 +316,7 @@ fn remove(c: &mut Criterion) {
             BatchSize::SmallInput,
         )
     });
-    g.bench_function("nitro-v2", |b| {
+    g.bench_function("nitro", |b| {
         b.iter_batched_ref(
             || {
                 let mut ids = Vec::with_capacity(size);
@@ -328,7 +328,7 @@ fn remove(c: &mut Criterion) {
             },
             |(s, ids)| {
                 for id in ids.iter() {
-                    s.remove(id);
+                    s.remove::<Composed>(id);
                 }
             },
             BatchSize::SmallInput,
@@ -469,7 +469,7 @@ fn get(c: &mut Criterion) {
             BatchSize::SmallInput,
         )
     });
-    g.bench_function("nitro-v2", |b| {
+    g.bench_function("nitro", |b| {
         b.iter_batched_ref(
             || {
                 let mut ids = Vec::with_capacity(size);
@@ -481,7 +481,7 @@ fn get(c: &mut Criterion) {
             },
             |(s, ids)| {
                 for i in indexes.iter() {
-                    let _ = black_box(s.get(&ids[*i]));
+                    let _ = black_box(s.get::<Composed>(&ids[*i]));
                 }
             },
             BatchSize::SmallInput,

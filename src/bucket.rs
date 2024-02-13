@@ -1,233 +1,168 @@
-use crate::params::{Size, UniqueTag};
-use core::{alloc::Layout, marker::PhantomData, mem::ManuallyDrop, ptr::copy_nonoverlapping};
+use crate::params::Size;
+use core::{alloc::Layout, marker::PhantomData, ptr::copy_nonoverlapping};
 use std::alloc::{alloc, dealloc};
 
-union CellData<T, S: Size> {
-    data: ManuallyDrop<T>,
-    index: ManuallyDrop<S>,
+struct Cell<T, S: Size> {
+    data: T,
+    token_index: S,
 }
 
-struct Cell<U: UniqueTag, T, S: Size> {
-    tag: U,
-    data: CellData<T, S>,
-}
-
-impl<U: UniqueTag, T, S: Size> Cell<U, T, S> {
-    fn new(tag: U, data: T) -> Self {
-        Self {
-            tag,
-            data: CellData {
-                data: ManuallyDrop::new(data),
-            },
-        }
-    }
-
-    fn new_with_index(tag: U, index: S) -> Self {
-        Self {
-            tag,
-            data: CellData {
-                index: ManuallyDrop::new(index),
-            },
-        }
+impl<T, S: Size> Cell<T, S> {
+    fn new(data: T, token_index: S) -> Self {
+        Self { data, token_index }
     }
 }
 
-pub(crate) struct Bucket<U: UniqueTag, S: Size> {
-    cells: *mut u8,
-    len: usize,
-    capacity: usize,
-    free_cursor: Option<S>,
+pub(crate) struct Bucket<S: Size> {
+    data: *mut u8,
     layout: Layout,
-    drop_cell_fn: unsafe fn(*mut u8),
-    reset_tag_fn: unsafe fn(*mut u8),
-    contains_data_fn: unsafe fn(*mut u8) -> bool,
-    compare_tag_fn: unsafe fn(*mut u8, tag: U) -> bool,
-    phantom: PhantomData<(U, S)>,
+    capacity: usize,
+    len: usize,
+    drop_fn: unsafe fn(*mut u8),
+    swap_fn: unsafe fn(*mut u8, *mut u8),
+    get_token_index_fn: unsafe fn(*mut u8) -> S,
+    phantom: PhantomData<S>,
 }
 
-impl<U: UniqueTag, S: Size> Bucket<U, S> {
+impl<S: Size> Bucket<S> {
     pub fn new<T>() -> Self {
         Self::with_capacity::<T>(0)
     }
 
     pub fn with_capacity<T>(capacity: usize) -> Self {
-        let cells = if capacity != 0 {
-            let array_layout = Layout::array::<Cell<U, T, S>>(capacity).unwrap();
+        let data = if capacity != 0 {
+            let array_layout = Layout::array::<Cell<T, S>>(capacity).unwrap();
             unsafe { std::alloc::alloc(array_layout) }
         } else {
             std::ptr::null_mut()
         };
 
         Self {
-            cells,
-            len: 0,
+            data,
+            layout: Layout::new::<Cell<T, S>>(),
             capacity,
-            free_cursor: None,
-            layout: Layout::new::<Cell<U, T, S>>(),
-            drop_cell_fn: |pointer| unsafe {
-                let cell = pointer.cast::<Cell<U, T, S>>().read();
-                debug_assert!(!cell.tag.is_removed());
-                debug_assert!(!cell.tag.is_locked());
-                ManuallyDrop::into_inner(cell.data.data);
+            len: 0,
+            drop_fn: |pointer| unsafe {
+                pointer.cast::<Cell<T, S>>().read();
             },
-            reset_tag_fn: |pointer| unsafe {
-                let cell = pointer.cast::<Cell<U, T, S>>().as_mut().unwrap();
-                cell.tag = U::default();
-            },
-            contains_data_fn: |pointer| {
-                let cell = unsafe { &*pointer.cast::<Cell<U, T, S>>() };
-                !cell.tag.is_removed() && !cell.tag.is_locked()
-            },
-            compare_tag_fn: |pointer, tag| tag == unsafe { &*pointer.cast::<Cell<U, T, S>>() }.tag,
+            swap_fn: |l, r| unsafe { l.cast::<Cell<T, S>>().swap(r.cast::<Cell<T, S>>()) },
+            get_token_index_fn: |pointer| unsafe { (*pointer.cast::<Cell<T, S>>()).token_index },
             phantom: Default::default(),
         }
     }
 
-    pub fn try_place<T>(&mut self, data: T) -> Result<(S, U), T> {
-        if self.layout != Layout::new::<T>() {
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    // set_token_index_unchecked must be called after push
+    pub unsafe fn push_unchecked<T: 'static>(&mut self, data: T) -> Result<S, T> {
+        debug_assert!(self.layout == Layout::new::<Cell<T, S>>());
+
+        if self.len == self.capacity && !self.try_grow::<Cell<T, S>>() {
             return Err(data);
         }
 
-        unsafe { self.place_unchecked(data) }
-    }
-
-    pub unsafe fn place_unchecked<T>(&mut self, data: T) -> Result<(S, U), T> {
-        debug_assert!(self.layout == Layout::new::<Cell<U, T, S>>());
-
-        // place to free cell
-        if let Some(free_index) = self.free_cursor {
-            let pointer = unsafe {
-                self.cells
-                    .cast::<Cell<U, T, S>>()
-                    .add(free_index.into_usize())
-            };
-
-            let cell = unsafe { pointer.as_ref().unwrap() };
-            debug_assert!(cell.tag.is_removed());
-
-            self.free_cursor = if ManuallyDrop::into_inner(cell.data.index) != free_index {
-                Some(ManuallyDrop::into_inner(cell.data.index))
-            } else {
-                None
-            };
-
-            let mut tag: U = cell.tag;
-            tag.set_removed(false);
-            unsafe { pointer.write(Cell::new(tag, data)) }
-            return Ok((free_index, tag));
-        }
-
-        // place to new cell
         let index = self.len;
-
-        // try grow if necessary
-        if index == self.capacity && (self.capacity == S::max() || !self.try_grow::<T>()) {
-            return Err(data);
-        }
-
-        let pointer = unsafe { self.cells.cast::<Cell<U, T, S>>().add(index) };
-        unsafe { pointer.write(Cell::new(U::default(), data)) };
+        let pointer = unsafe { self.data.cast::<Cell<T, S>>().add(index) };
+        unsafe { pointer.write(Cell::new(data, 0.into())) };
         self.len += 1;
-        Ok((S::from_usize(index), U::default()))
+        Ok(index.into())
     }
 
-    pub fn try_remove<T>(&mut self, index: S) -> Option<T> {
-        if self.layout != Layout::new::<T>() {
-            return None;
-        }
+    pub unsafe fn set_token_index_unchecked<T: 'static>(&mut self, index: S, token_index: S) {
+        let usize_index = index.into();
+        debug_assert!(usize_index < self.len);
 
-        unsafe { self.remove_unchecked(index) }
+        unsafe {
+            let cell = &mut *self.data.cast::<Cell<T, S>>().add(usize_index);
+            cell.token_index = token_index;
+        }
     }
 
-    pub unsafe fn remove_unchecked<T>(&mut self, index: S) -> Option<T> {
-        debug_assert!(self.layout == Layout::new::<Cell<U, T, S>>());
+    pub unsafe fn swap_remove_unchecked<T: 'static>(&mut self, index: S) -> (T, Option<S>) {
+        let usize_index = index.into();
+        debug_assert!(usize_index < self.len);
 
-        if index.into_usize() >= self.len {
+        let pointer_to_last = unsafe { self.data.cast::<Cell<T, S>>().add(self.len - 1) };
+        if usize_index == self.len - 1 {
+            self.len -= 1;
+            return unsafe {
+                let cell = pointer_to_last.read();
+                (cell.data, None)
+            };
+        }
+
+        let pointer = unsafe { self.data.cast::<Cell<T, S>>().add(usize_index) };
+        unsafe { pointer.swap(pointer_to_last) }
+
+        self.len -= 1;
+        unsafe {
+            let cell = &*pointer;
+            let removed_cell = pointer_to_last.read(); // drop data
+            (removed_cell.data, Some(cell.token_index))
+        }
+    }
+
+    pub unsafe fn swap_erase_unchecked(&mut self, index: S) -> Option<S> {
+        let usize_index = index.into();
+        debug_assert!(usize_index < self.len);
+
+        let pointer_to_last = self.get_pointer_unchecked(self.len - 1);
+        if usize_index == self.len - 1 {
+            self.len -= 1;
+            (self.drop_fn)(pointer_to_last);
             return None;
         }
 
-        let pointer = unsafe { self.cells.cast::<Cell<U, T, S>>().add(index.into_usize()) };
-        let cell = unsafe { pointer.as_mut().unwrap() };
-        if cell.tag.is_removed() || cell.tag.is_locked() {
-            return None;
-        }
-
-        let data = {
-            let cell = unsafe { pointer.read() };
-            Some(ManuallyDrop::into_inner(cell.data.data))
-        };
-
-        let mut tag = cell.tag.next();
-        if tag == cell.tag {
-            tag.mark_locked();
-            unsafe { pointer.write(Cell::new_with_index(tag, index)) }
-            return data;
-        }
-
-        let prev_free_index = match self.free_cursor {
-            Some(free_index) => free_index,
-            None => index,
-        };
-
-        tag.set_removed(true);
-        unsafe { pointer.write(Cell::new_with_index(tag, prev_free_index)) }
-        self.free_cursor = Some(index);
-        data
+        let pointer = self.get_pointer_unchecked(usize_index);
+        (self.swap_fn)(pointer, pointer_to_last);
+        (self.drop_fn)(pointer_to_last);
+        self.len -= 1;
+        unsafe { Some((self.get_token_index_fn)(pointer)) }
     }
 
     pub fn try_get<T>(&self, index: S) -> Option<&T> {
-        if self.layout != Layout::new::<T>() {
+        if self.layout != Layout::new::<Cell<T, S>>() {
             return None;
         }
 
-        unsafe { self.get_unchecked(index) }
+        if index.into() >= self.len {
+            return None;
+        }
+
+        unsafe { Some(self.get_unchecked(index)) }
     }
 
-    pub unsafe fn get_unchecked<T>(&self, index: S) -> Option<&T> {
-        debug_assert!(self.layout == Layout::new::<Cell<U, T, S>>());
+    pub unsafe fn get_unchecked<T>(&self, index: S) -> &T {
+        debug_assert!(self.layout == Layout::new::<Cell<T, S>>());
+        debug_assert!(index.into() < self.len);
 
-        if index.into_usize() >= self.len {
-            return None;
+        unsafe {
+            let cell = &*self.data.cast::<Cell<T, S>>().add(index.into());
+            &cell.data
         }
-
-        let cell = unsafe { &*self.cells.cast::<Cell<U, T, S>>().add(index.into_usize()) };
-        if cell.tag.is_removed() || cell.tag.is_locked() {
-            return None;
-        }
-
-        Some(&cell.data.data)
     }
 
     pub fn try_get_mut<T>(&mut self, index: S) -> Option<&mut T> {
-        if self.layout != Layout::new::<T>() {
+        if self.layout != Layout::new::<Cell<T, S>>() {
             return None;
         }
 
-        unsafe { self.get_mut_unchecked(index) }
+        if index.into() >= self.len {
+            return None;
+        }
+
+        unsafe { Some(self.get_mut_unchecked(index)) }
     }
 
-    pub unsafe fn get_mut_unchecked<T>(&mut self, index: S) -> Option<&mut T> {
-        debug_assert!(self.layout == Layout::new::<Cell<U, T, S>>());
+    pub unsafe fn get_mut_unchecked<T>(&mut self, index: S) -> &mut T {
+        debug_assert!(self.layout == Layout::new::<Cell<T, S>>());
+        debug_assert!(index.into() < self.len);
 
-        if index.into_usize() >= self.len {
-            return None;
-        }
-
-        let cell = unsafe { &mut *self.cells.cast::<Cell<U, T, S>>().add(index.into_usize()) };
-        if cell.tag.is_removed() || cell.tag.is_locked() {
-            return None;
-        }
-
-        Some(&mut cell.data.data)
-    }
-
-    pub unsafe fn contains(&self, tag: U, index: S) -> bool {
-        if index.into_usize() >= self.len {
-            return false;
-        }
         unsafe {
-            let pointer = self.get_pointer_unchecked(index.into_usize());
-            (self.compare_tag_fn)(pointer, tag)
+            let cell = &mut *self.data.cast::<Cell<T, S>>().add(index.into());
+            &mut cell.data
         }
     }
 
@@ -241,30 +176,51 @@ impl<U: UniqueTag, S: Size> Bucket<U, S> {
         } else {
             4 //#TODO setup start capacity
         };
-        let layout = Layout::array::<Cell<U, T, S>>(new_capacity).unwrap();
+
+        let layout = Layout::array::<Cell<T, S>>(new_capacity).unwrap();
         let pointer = unsafe { alloc(layout) };
 
         unsafe {
             copy_nonoverlapping(
-                self.cells.cast::<Cell<U, T, S>>(),
-                pointer.cast::<Cell<U, T, S>>(),
+                self.data.cast::<Cell<T, S>>(),
+                pointer.cast::<Cell<T, S>>(),
                 self.len,
             );
         }
 
-        if !self.cells.is_null() {
-            unsafe { dealloc(self.cells, layout) }
+        if !self.data.is_null() {
+            unsafe { dealloc(self.data, layout) }
         }
-        self.cells = pointer;
+
+        self.data = pointer;
         self.capacity = new_capacity;
         true
     }
 
     pub unsafe fn shrink_to_fit(&mut self) {
         todo!()
+        // if self.capacity == 0 {
+        //     return;
+        // }
+
+        // let (layout, size) = self.layout.repeat(self.len).unwrap();
+        // assert_eq!(size, self.len);
+
+        // let mut pointer = std::ptr::null_mut();
+        // if self.len != 0 {
+        //     pointer = unsafe { alloc(layout) };
+        //     unsafe { copy_nonoverlapping(self.data, pointer, layout.size() * self.len) }
+        // }
+
+        // if !self.data.is_null() {
+        //     unsafe { dealloc(self.data, layout) }
+        // }
+
+        // self.data = pointer;
+        // self.capacity = self.len;
     }
 
-    pub unsafe fn reset(&mut self) {
+    pub unsafe fn clear(&mut self) {
         if self.len == 0 {
             return;
         }
@@ -279,38 +235,15 @@ impl<U: UniqueTag, S: Size> Bucket<U, S> {
 
             unsafe {
                 let pointer = self.get_pointer_unchecked(index);
-                if (self.contains_data_fn)(pointer) {
-                    (self.drop_cell_fn)(pointer);
-                }
-                (self.reset_tag_fn)(pointer)
+                (self.drop_fn)(pointer)
             }
         }
-    }
-
-    pub unsafe fn clear(&mut self) -> bool {
-        if self.len == 0 {
-            return false;
-        }
-
-        let mut index = self.len;
-        loop {
-            if index == 0 {
-                break;
-            }
-
-            index -= 1;
-
-            let pointer = unsafe { self.get_pointer_unchecked(index) };
-            if unsafe { (self.contains_data_fn)(pointer) } {
-                unsafe { (self.drop_cell_fn)(pointer) };
-            }
-        }
-        self.len = 0;
-        true
     }
 
     pub unsafe fn drop(bucket: &mut Self) {
-        if !Self::clear(bucket) {
+        Self::clear(bucket);
+
+        if Self::capacity(bucket) == 0 {
             return;
         }
 
@@ -319,11 +252,11 @@ impl<U: UniqueTag, S: Size> Bucket<U, S> {
             bucket.layout.align(),
         );
 
-        unsafe { dealloc(bucket.cells, array_layout) }
+        unsafe { dealloc(bucket.data, array_layout) }
     }
 
     unsafe fn get_pointer_unchecked(&self, index: usize) -> *mut u8 {
         let aligned = self.layout.pad_to_align();
-        unsafe { self.cells.add(aligned.size() * index) }
+        unsafe { self.data.add(aligned.size() * index) }
     }
 }

@@ -105,33 +105,52 @@ impl_repeat_in!(RepeatIn32, u32);
 impl_repeat_in!(RepeatIn64, u64);
 impl_repeat_in!(RepeatIn128, u128);
 
-pub trait Size: Copy + Clone + Debug + Default + Eq + PartialEq {
+pub trait Size:
+    Copy + Clone + Debug + Default + Eq + PartialEq + From<usize> + Into<usize>
+{
     fn max() -> usize;
-    fn from_usize(value: usize) -> Self;
-    fn into_usize(self) -> usize;
 }
 
-impl Size for u32 {
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct U32Size(u32);
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct USize(usize);
+
+impl From<usize> for U32Size {
+    fn from(value: usize) -> Self {
+        assert!(value <= u32::MAX as usize);
+        Self(u32::min(value as _, u32::MAX))
+    }
+}
+
+impl Into<usize> for U32Size {
+    fn into(self) -> usize {
+        self.0 as _
+    }
+}
+
+impl Size for U32Size {
     fn max() -> usize {
         u32::MAX as _
     }
-    fn from_usize(value: usize) -> Self {
+}
+
+impl From<usize> for USize {
+    fn from(value: usize) -> Self {
         assert!(value <= u32::MAX as usize);
-        u32::min(value as _, u32::MAX)
-    }
-    fn into_usize(self) -> usize {
-        self as _
+        Self(value)
     }
 }
 
-impl Size for usize {
+impl Into<usize> for USize {
+    fn into(self) -> usize {
+        self.0
+    }
+}
+
+impl Size for USize {
     fn max() -> usize {
         usize::MAX
-    }
-    fn from_usize(value: usize) -> Self {
-        value
-    }
-    fn into_usize(self) -> usize {
-        self as _
     }
 }

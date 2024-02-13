@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 pub struct Storage<S: Size = U32Size, U: UniqueTag = Unique32> {
     tokens: TokenBucket<S, U>,
-    data: Vec<(TypeId, Bucket<S>)>,
+    buckets: Vec<(TypeId, Bucket<S>)>,
     bucket_indexes: HashMap<TypeId, S>,
 }
 
@@ -17,7 +17,7 @@ impl Storage<U32Size, Unique32> {
     pub fn new() -> Self {
         Self {
             tokens: TokenBucket::new(),
-            data: Vec::new(),
+            buckets: Vec::new(),
             bucket_indexes: HashMap::new(),
         }
     }
@@ -27,7 +27,7 @@ impl Storage {
     pub fn new_with_tag_and_size<S: Size, U: UniqueTag>() -> Storage<S, U> {
         Storage {
             tokens: TokenBucket::new(),
-            data: Vec::new(),
+            buckets: Vec::new(),
             bucket_indexes: HashMap::new(),
         }
     }
@@ -39,13 +39,14 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
         let bucket_index = *self
             .bucket_indexes
             .entry(type_id)
-            .or_insert(self.data.len().into());
+            .or_insert(self.buckets.len().into());
 
-        if bucket_index == self.data.len().into() {
-            self.data.push((type_id, Bucket::new::<T>()));
+        if bucket_index == self.buckets.len().into() {
+            assert_ne!(self.buckets.len(), S::max());
+            self.buckets.push((type_id, Bucket::new::<T>()));
         }
 
-        let bucket = &mut self.data[bucket_index.into()].1;
+        let bucket = &mut self.buckets[bucket_index.into()].1;
 
         match unsafe { bucket.push_unchecked(data) } {
             Ok(inbucket_index) => {
@@ -59,11 +60,12 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
         }
     }
 
-    pub fn place_at<T: 'static>(bucket_ref: BucketRef<'_, S, U>, data: T) -> Id<S, U> {
+    pub fn place_in_bucket<T: 'static>(bucket_ref: BucketRef<'_, S, U>, data: T) -> Id<S, U> {
         let type_id = TypeId::of::<T>();
         let bucket_index = *bucket_ref.entry.or_insert(bucket_ref.data.len().into());
 
         if bucket_index == bucket_ref.data.len().into() {
+            assert_ne!(bucket_ref.data.len(), S::max());
             bucket_ref.data.push((type_id, Bucket::new::<T>()));
         }
 
@@ -89,7 +91,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
                 }
 
                 let location = unsafe { *token.location() };
-                match self.data.get_mut(location.bucket_index().into()) {
+                match self.buckets.get_mut(location.bucket_index().into()) {
                     Some((type_id, bucket)) => {
                         if TypeId::of::<T>() != *type_id {
                             return None;
@@ -121,7 +123,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
             }
 
             let location = unsafe { *token.location() };
-            if let Some((_, bucket)) = self.data.get_mut(location.bucket_index().into()) {
+            if let Some((_, bucket)) = self.buckets.get_mut(location.bucket_index().into()) {
                 self.tokens.mark_removed(id.token_index());
 
                 let token_index_for_swap =
@@ -139,7 +141,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
         match self.tokens.try_get_token(id.token_index()) {
             Some(token) => {
                 let location = unsafe { *token.location() };
-                let (type_id, bucket) = &self.data[location.bucket_index().into()];
+                let (type_id, bucket) = &self.buckets[location.bucket_index().into()];
                 if TypeId::of::<T>() != *type_id {
                     panic!();
                 }
@@ -154,7 +156,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
         match self.tokens.try_get_token(id.token_index()) {
             Some(token) => {
                 let location = unsafe { *token.location() };
-                match self.data.get(location.bucket_index().into()) {
+                match self.buckets.get(location.bucket_index().into()) {
                     Some((type_id, bucket)) => {
                         if TypeId::of::<T>() != *type_id {
                             return None;
@@ -173,7 +175,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
         match self.tokens.try_get_token(id.token_index()) {
             Some(token) => {
                 let location = unsafe { *token.location() };
-                let (type_id, bucket) = &mut self.data[location.bucket_index().into()];
+                let (type_id, bucket) = &mut self.buckets[location.bucket_index().into()];
                 if TypeId::of::<T>() != *type_id {
                     panic!();
                 }
@@ -188,7 +190,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
         match self.tokens.try_get_token(id.token_index()) {
             Some(token) => {
                 let location = unsafe { *token.location() };
-                match self.data.get_mut(location.bucket_index().into()) {
+                match self.buckets.get_mut(location.bucket_index().into()) {
                     Some((type_id, bucket)) => {
                         if TypeId::of::<T>() != *type_id {
                             return None;
@@ -211,11 +213,11 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
         match self.tokens.try_get_token(id.token_index()) {
             Some(token) => {
                 let usize_bucket_index = unsafe { token.location().bucket_index().into() };
-                if usize_bucket_index >= self.data.len() {
+                if usize_bucket_index >= self.buckets.len() {
                     return false;
                 }
 
-                let (type_id, _) = &self.data[usize_bucket_index];
+                let (type_id, _) = &self.buckets[usize_bucket_index];
                 if TypeId::of::<T>() != *type_id {
                     return false;
                 }
@@ -230,18 +232,18 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
     pub fn shrink_to_fit(&mut self) {
         self.tokens.shrink_to_fit();
         self.bucket_indexes.shrink_to_fit();
-        for (_, bucket) in self.data.iter_mut() {
+        for (_, bucket) in self.buckets.iter_mut() {
             unsafe {
                 bucket.shrink_to_fit();
             }
         }
-        self.data.shrink_to_fit();
+        self.buckets.shrink_to_fit();
     }
 
     // // remove all placed data
     pub fn clear(&mut self) {
         self.tokens.clear();
-        for (_, bucket) in self.data.iter_mut() {
+        for (_, bucket) in self.buckets.iter_mut() {
             unsafe {
                 Bucket::clear(bucket);
             }
@@ -252,7 +254,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
     pub fn reset(&mut self) {
         self.tokens.reset_tokens();
         self.bucket_indexes.clear();
-        for (_, bucket) in self.data.iter_mut() {
+        for (_, bucket) in self.buckets.iter_mut() {
             unsafe {
                 Bucket::clear(bucket);
             }
@@ -262,7 +264,7 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
     pub fn bucket_ref<T: 'static>(&mut self) -> BucketRef<'_, S, U> {
         BucketRef {
             tokens: &mut self.tokens,
-            data: &mut self.data,
+            data: &mut self.buckets,
             entry: self.bucket_indexes.entry(TypeId::of::<T>()),
         }
     }
@@ -276,7 +278,7 @@ impl Default for Storage {
 
 impl<S: Size, U: UniqueTag> Drop for Storage<S, U> {
     fn drop(&mut self) {
-        for (_, bucket) in self.data.iter_mut() {
+        for (_, bucket) in self.buckets.iter_mut() {
             unsafe { Bucket::drop(bucket) }
         }
     }

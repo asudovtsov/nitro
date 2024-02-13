@@ -87,7 +87,10 @@ impl<S: Size, U: UniqueTag> TokenBucket<S, U> {
             return (free, token.tag);
         }
         let token_index = self.tokens.len();
+
+        assert_ne!(self.tokens.len(), S::max());
         self.tokens.push(Token::new(bucket_index, inbucket_index));
+
         (token_index.into(), self.tokens.last().unwrap().tag)
     }
 

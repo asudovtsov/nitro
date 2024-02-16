@@ -268,6 +268,17 @@ impl<S: Size, U: UniqueTag> Storage<S, U> {
             entry: self.bucket_indexes.entry(TypeId::of::<T>()),
         }
     }
+
+    pub fn get_type_id(&self, id: &Id<S, U>) -> Option<&TypeId> {
+        match self.tokens.try_get_token(id.token_index()) {
+            Some(token) => {
+                let location = unsafe { *token.location() };
+                let (type_id, _) = &self.buckets[location.bucket_index().into()];
+                Some(type_id)
+            }
+            None => None,
+        }
+    }
 }
 
 impl Default for Storage {

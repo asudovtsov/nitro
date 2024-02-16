@@ -111,7 +111,7 @@ pub trait Size:
     fn max() -> usize;
 }
 
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct U32Size(u32);
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -124,9 +124,9 @@ impl From<usize> for U32Size {
     }
 }
 
-impl Into<usize> for U32Size {
-    fn into(self) -> usize {
-        self.0 as _
+impl From<U32Size> for usize {
+    fn from(value: U32Size) -> Self {
+        value.0 as _
     }
 }
 
@@ -143,9 +143,9 @@ impl From<usize> for USize {
     }
 }
 
-impl Into<usize> for USize {
-    fn into(self) -> usize {
-        self.0
+impl From<USize> for usize {
+    fn from(value: USize) -> Self {
+        value.0
     }
 }
 

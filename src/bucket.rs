@@ -21,6 +21,7 @@ pub(crate) struct Bucket<S: Size> {
     drop_fn: unsafe fn(*mut u8),
     swap_fn: unsafe fn(*mut u8, *mut u8),
     get_token_index_fn: unsafe fn(*mut u8) -> S,
+    get_array_layout: fn(len: usize) -> Layout,
     phantom: PhantomData<S>,
 }
 
@@ -47,6 +48,7 @@ impl<S: Size> Bucket<S> {
             },
             swap_fn: |l, r| unsafe { l.cast::<Cell<T, S>>().swap(r.cast::<Cell<T, S>>()) },
             get_token_index_fn: |pointer| unsafe { (*pointer.cast::<Cell<T, S>>()).token_index },
+            get_array_layout: |len| Layout::array::<Cell<T, S>>(len).unwrap(),
             phantom: Default::default(),
         }
     }
@@ -180,15 +182,15 @@ impl<S: Size> Bucket<S> {
         let layout = Layout::array::<Cell<T, S>>(new_capacity).unwrap();
         let pointer = unsafe { alloc(layout) };
 
-        unsafe {
-            copy_nonoverlapping(
-                self.data.cast::<Cell<T, S>>(),
-                pointer.cast::<Cell<T, S>>(),
-                self.len,
-            );
-        }
-
         if !self.data.is_null() {
+            unsafe {
+                copy_nonoverlapping(
+                    self.data.cast::<Cell<T, S>>(),
+                    pointer.cast::<Cell<T, S>>(),
+                    self.len,
+                );
+            }
+
             unsafe { dealloc(self.data, layout) }
         }
 
@@ -198,26 +200,24 @@ impl<S: Size> Bucket<S> {
     }
 
     pub unsafe fn shrink_to_fit(&mut self) {
-        todo!()
-        // if self.capacity == 0 {
-        //     return;
-        // }
+        if self.capacity == 0 {
+            return;
+        }
 
-        // let (layout, size) = self.layout.repeat(self.len).unwrap();
-        // assert_eq!(size, self.len);
+        let mut pointer = std::ptr::null_mut();
+        if self.len != 0 {
+            let layout = (self.get_array_layout)(self.len);
+            pointer = unsafe { alloc(layout) };
+            unsafe { copy_nonoverlapping(self.data, pointer, layout.size() * self.len) }
+        }
 
-        // let mut pointer = std::ptr::null_mut();
-        // if self.len != 0 {
-        //     pointer = unsafe { alloc(layout) };
-        //     unsafe { copy_nonoverlapping(self.data, pointer, layout.size() * self.len) }
-        // }
+        if !self.data.is_null() {
+            let layout = (self.get_array_layout)(self.capacity);
+            unsafe { dealloc(self.data, layout) }
+        }
 
-        // if !self.data.is_null() {
-        //     unsafe { dealloc(self.data, layout) }
-        // }
-
-        // self.data = pointer;
-        // self.capacity = self.len;
+        self.data = pointer;
+        self.capacity = self.len;
     }
 
     pub unsafe fn clear(&mut self) {
